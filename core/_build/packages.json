@@ -1,0 +1,9 @@
+{
+  "source_dir": "C:\\Users\\Stran\\.gemini\\antigravity\\scratch\\moonlight-kernel\\core",
+  "name": "moonlight/kernel",
+  "packages": [],
+  "deps": [],
+  "backend": "wasm-gc",
+  "opt_level": "release",
+  "source": "lib"
+}

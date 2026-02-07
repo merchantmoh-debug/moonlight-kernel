@@ -1,6 +1,4 @@
 {
-  "is_main": true,
-  "readme": "README.md",
   "targets": {
     "wasm": {
       "export_memory_name": "moonlight_memory"
