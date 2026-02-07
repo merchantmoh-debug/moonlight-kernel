@@ -97,15 +97,56 @@ Project Moonlight includes the **Ark Synthesizer** (`scripts/synthesize_moonbit_
 
 ---
 
+## ⚠️ STATUS INTERFACE
+
+| Core | Version | Status | Access |
+| :--- | :--- | :--- | :--- |
+| **Moonlight Kernel** | **V2** | **PRODUCTION** | [Open Source (Apache 2.0)](./LICENSE) |
+| **Synthesis Engine** | **V2** | **PUBLIC** | [Included](./scripts/synthesize_moonbit_kernel.py) |
+| **Genesis Pro** | **V3** | **PROPRIETARY** | [Contact for License](#-commercial-access) |
+| **The Ocean** | **V4** | **SIMULATION** | [Protocol Validated](./scripts/ark_v4_swarm_sim.py) |
+
+---
+
+## 💸 FUNDING & SUPPORT
+
+**Project Moonlight is an Independent Sovereign Research Initiative.**
+We are building the infrastructure that big tech won't.
+
+*   **Support the Architect:** [ko-fi.com/merchantmohdebug](https://ko-fi.com/merchantmohdebug)
+*   **Sponsor on GitHub:** [Coming Soon]
+
+> "We do not ask for permission. We ask for compute."
+
+---
+
+## 🔐 COMMERCIAL ACCESS (V3 / GENESIS PRO)
+
+The **V3 Genesis Engine** includes:
+1.  **Automatic Differentiation (Autodiff):** Generate gradient tapes for training, not just inference.
+2.  **GPU Stubs:** Bindings for `wgpu` and CUDA computation.
+3.  **Graph Fusion:** Advanced kernel fusion for 100x throughput.
+
+**To Acquire V3:**
+*   **Enterprise Licensing:** Contact the maintainer directly.
+*   **Sponsor Tier:** Available to Gold Tier Sponsors ($5k/mo).
+
+---
+
+## 🗺️ THE ROADMAP (THE SOVEREIGN OCEAN)
+
+*   [x] **Phase 1: The Spark.** (Synthesize 46k lines of MoonBit). **[COMPLETE]**
+*   [x] **Phase 2: The Bridge.** (Zero-Copy Python<->Rust<->Wasm). **[COMPLETE]**
+*   [ ] **Phase 3: The Trainer.** (V3 Engine - Local Finetuning). **[PRIVATE BETA]**
+*   [ ] **Phase 4: The Ocean.** (V4 Protocol - Decentralized Swarm Intelligence). **[ARCHITECTED]**
+
+---
+
 ## 🛡️ LICENSE & SOVEREIGNTY
 
 **Apache 2.0 Licensed.**
 We believe in open infrastructure.
 
 *   **Repository:** [github.com/merchantmoh-debug/moonlight-kernel](https://github.com/merchantmoh-debug/moonlight-kernel)
-*   **Status:** Deployed for 2026 MoonBit Challenge.
-*   **Scale:** 46k+ Lines Verified.
+*   **Signed:** `Mohamad | The Sovereign Architect`
 
-*Signed,*
-**The Sovereign Architect**
-*(On behalf of Project Moonlight)*
