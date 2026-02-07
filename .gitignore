@@ -1,0 +1,19 @@
+# MoonBit
+target/
+.moon/
+*.wasm
+
+# Rust
+target/
+**/*.rs.bk
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.so
+*.dll
+
+# Spec
+.DS_Store
