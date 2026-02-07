@@ -1,0 +1,13 @@
+[package]
+name = "moonlight-bridge"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+wasmtime = "14.0"
+cntr = "0.1" # Container control for advanced orchestration
+anyhow = "1.0"
+
+[build-dependencies]
+# We would use wit-bindgen here for full component model support
+# wit-bindgen-core = "0.10"

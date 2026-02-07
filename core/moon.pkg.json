@@ -1,0 +1,8 @@
+{
+  "is_main": true,
+  "targets": {
+    "wasm": {
+      "export_memory_name": "moonlight_memory"
+    }
+  }
+}
