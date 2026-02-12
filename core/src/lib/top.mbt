@@ -1,8 +1,10 @@
 // Project Moonlight: The Kinetic Core
 // "Speed is Safety."
 
-/// A Ring Buffer structure residing in Linear Memory.
-/// Rust (Host) writes to `buffer`, MoonBit (Wasm) reads and processes.
+package lib
+
+/// A Ring Buffer structure.
+/// For this MVP, we use safe accessors to avoid memory corruption.
 struct RingBuffer {
   capacity : Int
   mut write_head : Int
@@ -10,7 +12,7 @@ struct RingBuffer {
   buffer : Array[Byte]
 }
 
-// Global state (The "Truth" in memory)
+// Global state
 let ring : RingBuffer = {
   capacity: 1024,
   write_head: 0,
@@ -18,10 +20,22 @@ let ring : RingBuffer = {
   buffer: Array::make(1024, b'\x00')
 }
 
-/// Helper: Write a byte to the ring buffer (Used by Host via FFI if needed, or Host writes directly)
-pub fn write_byte(b : Byte) -> Unit {
-  ring.buffer[ring.write_head] = b
-  ring.write_head = (ring.write_head + 1) % ring.capacity
+/// Safe Accessor: Host writes a byte to the buffer at a specific index.
+/// This prevents memory corruption by ensuring bounds checks.
+pub fn set_input_byte(index : Int, val : Int) -> Unit {
+  let safe_index = index % ring.capacity
+  // Convert Int to Byte (truncating)
+  ring.buffer[safe_index] = val.to_byte()
+}
+
+/// Safe Accessor: Host updates the write head after filling the buffer.
+pub fn set_write_head(pos : Int) -> Unit {
+  ring.write_head = pos % ring.capacity
+}
+
+/// Safe Accessor: Host can read the current read head position.
+pub fn get_read_head() -> Int {
+  ring.read_head
 }
 
 /// The "Sovereign Logic": Process the buffer
@@ -29,32 +43,48 @@ pub fn write_byte(b : Byte) -> Unit {
 pub fn process_tensor_stream() -> Int {
   let mut processed_count = 0
   
-  // "Hot Loop" - Process until read catches up to write
-  while ring.read_head != ring.write_head do {
-    let b = ring.buffer[ring.read_head]
+  // Weights for our "Neuron"
+  let weights = Vec3::new(0.5, 0.5, 0.5)
+
+  // "Hot Loop" - Process in chunks of 3 (Vec3)
+  // Logic: read_head catches up to write_head
+
+  // Handle wrapping logic is complex, so we simplify:
+  // We process as long as we have 3 bytes available.
+
+  while diff(ring.read_head, ring.write_head, ring.capacity) >= 3 {
+
+    // 1. Load Data
+    let r = ring.read_head
+    let b1 = ring.buffer[r].to_int().to_double()
+    let b2 = ring.buffer[(r + 1) % ring.capacity].to_int().to_double()
+    let b3 = ring.buffer[(r + 2) % ring.capacity].to_int().to_double()
     
-    // NEURO-SYMBOLIC OPERATION:
-    // If byte is > 127 (activation threshold), we flag it.
-    // In a real kernel, this would be Matrix Multiplication or State Validation.
-    if b.to_int() > 127 {
-       // "Neuron Activated"
-       ignore(b) 
+    // 2. Form Signal
+    let signal = Vec3::new(b1, b2, b3)
+
+    // 3. Neuro-Symbolic Operation (Dot Product)
+    let activation = signal.dot(weights)
+
+    // 4. Threshold Check (Mock Activation)
+    if activation > 100.0 {
+       ignore(activation)
     }
 
-    ring.read_head = (ring.read_head + 1) % ring.capacity
-    processed_count = processed_count + 1
+    ring.read_head = (ring.read_head + 3) % ring.capacity
+    processed_count = processed_count + 3
   }
 
   processed_count
 }
 
-/// Exported function to get the memory offset of the buffer.
-/// Optimizes Zero-Copy: Host asks "Where is the buffer?" -> MoonBit says "Here".
-pub fn get_buffer_ptr() -> Int {
-  // In MoonBit, arrays are objects. We need unsafe access to the raw pointer.
-  // For this MVP, we return a mock pointer or use FFI conventions.
-  // (Actual implementation requires `unsafe` or `interop` package)
-  0 // Placeholder for Raw Pointer Address
+// Helper for ring buffer difference
+fn diff(read : Int, write : Int, cap : Int) -> Int {
+  if write >= read {
+    write - read
+  } else {
+    (cap - read) + write
+  }
 }
 
 pub fn main() -> Unit {

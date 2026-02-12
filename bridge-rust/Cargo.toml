@@ -5,8 +5,8 @@ edition = "2021"
 
 [dependencies]
 wasmtime = "14.0"
-cntr = "0.1" # Container control for advanced orchestration
 anyhow = "1.0"
+# cntr removed due to version mismatch and non-usage
 
 [build-dependencies]
 # We would use wit-bindgen here for full component model support
