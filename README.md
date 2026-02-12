@@ -82,17 +82,19 @@ Project Moonlight includes the **Ark Synthesizer** (`scripts/synthesize_moonbit_
     ```
 
 2.  **Awaken the Beast (Build):**
+    We use the "Mechanic's Ear" build system (Makefile) for simplicity.
     ```bash
-    # 1. Compile the MoonBit Core to Wasm
-    cd core && moon build --target wasm
-
-    # 2. Build the Rust Bridge
-    cd ../bridge-rust && cargo build --release
+    make build
     ```
 
 3.  **Run the Protocol:**
     ```bash
-    cargo run --release
+    make run
+    ```
+
+4.  **Verify Integrity:**
+    ```bash
+    make test
     ```
 
 ---
@@ -104,7 +106,7 @@ Project Moonlight includes the **Ark Synthesizer** (`scripts/synthesize_moonbit_
 | **Moonlight Kernel** | **V2** | **PRODUCTION** | [Open Source (Apache 2.0)](./LICENSE) |
 | **Synthesis Engine** | **V2** | **PUBLIC** | [Included](./scripts/synthesize_moonbit_kernel.py) |
 | **Genesis Pro** | **V3** | **PROPRIETARY** | [Contact for License](#-commercial-access) |
-| **The Ocean** | **V4** | **SIMULATION** | [Protocol Validated](./scripts/ark_v4_swarm_sim.py) |
+| **The Ocean** | **V4** | **SIMULATION** | [Protocol Validated](./examples/sim_swarm_learning.py) |
 
 ---
 
@@ -149,4 +151,3 @@ We believe in open infrastructure.
 
 *   **Repository:** [github.com/merchantmoh-debug/moonlight-kernel](https://github.com/merchantmoh-debug/moonlight-kernel)
 *   **Signed:** `Mohamad | The Sovereign Architect`
-
