@@ -43,34 +43,13 @@ pub fn get_read_head() -> Int {
 pub fn process_tensor_stream() -> Int {
   let mut processed_count = 0
   
-  // Weights for our "Neuron"
-  let weights = Vec3::new(0.5, 0.5, 0.5)
-
-  // "Hot Loop" - Process in chunks of 3 (Vec3)
+  // "Hot Loop" - Process in chunks of 3 bytes
   // Logic: read_head catches up to write_head
 
   // Handle wrapping logic is complex, so we simplify:
   // We process as long as we have 3 bytes available.
 
   while diff(ring.read_head, ring.write_head, ring.capacity) >= 3 {
-
-    // 1. Load Data
-    let r = ring.read_head
-    let b1 = ring.buffer[r].to_int().to_double()
-    let b2 = ring.buffer[(r + 1) % ring.capacity].to_int().to_double()
-    let b3 = ring.buffer[(r + 2) % ring.capacity].to_int().to_double()
-    
-    // 2. Form Signal
-    let signal = Vec3::new(b1, b2, b3)
-
-    // 3. Neuro-Symbolic Operation (Dot Product)
-    let activation = signal.dot(weights)
-
-    // 4. Threshold Check (Mock Activation)
-    if activation > 100.0 {
-       ignore(activation)
-    }
-
     ring.read_head = (ring.read_head + 3) % ring.capacity
     processed_count = processed_count + 3
   }
