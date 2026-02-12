@@ -152,7 +152,7 @@ pub fn dot(self : {name}, other : {name}) -> Double {{
 pub fn normalize(self : {name}) -> {name} {{
   let len = (self.dot(self)).sqrt()
   if len == 0.0 {{
-     self 
+     self
   }} else {{
      {{ x: self.x / len, y: self.y / len, z: self.z / len }}
   }}
