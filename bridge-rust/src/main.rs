@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use wasmtime::*;
 
 /// Project Moonlight: The Rust Bridge ("Zheng")
@@ -9,43 +9,79 @@ fn main() -> Result<()> {
     // 1. Setup Wasm Engine
     let engine = Engine::default();
     let mut store = Store::new(&engine, ());
-    let module = Module::from_file(&engine, "../core/target/wasm/release/build/lib/lib.wasm")
-        .expect("Failed to load MoonBit Kernel Wasm. Did you compile 'core'?");
+
+    // Path to the MoonBit Kernel Wasm artifact
+    let wasm_path = "../core/target/wasm/release/build/lib/lib.wasm";
+
+    println!("Moonlight Bridge: Loading kernel from '{}'...", wasm_path);
+
+    let module = Module::from_file(&engine, wasm_path)
+        .with_context(|| format!("Failed to load MoonBit Kernel Wasm at '{}'. Did you run 'moon build' in core/?", wasm_path))?;
 
     // 2. Linker & Imports
     let linker = Linker::new(&engine);
     
     // 3. Instantiate
-    let instance = linker.instantiate(&mut store, &module)?;
+    let instance = linker.instantiate(&mut store, &module)
+        .context("Failed to instantiate Wasm module")?;
 
-    // 4. Zero-Copy Handshake
-    // Get the exported memory from MoonBit
-    let memory = instance
-        .get_memory(&mut store, "moonlight_memory")
-        .expect("MoonBit kernel must export 'moonlight_memory'");
+    // 4. Zero-Copy Handshake (Safe Mode)
+    // We use safe accessor functions to prevent memory corruption.
+
+    // Function to set a single byte in the buffer
+    let set_byte = instance
+        .get_typed_func::<(i32, i32), ()>(&mut store, "set_input_byte")
+        .context("MoonBit kernel must export 'set_input_byte'")?;
+
+    // Function to update the write head
+    let set_head = instance
+        .get_typed_func::<i32, ()>(&mut store, "set_write_head")
+        .context("MoonBit kernel must export 'set_write_head'")?;
 
     // Get the processing function
     let process_func = instance
-        .get_typed_func::<(), i32>(&mut store, "process_tensor_stream")?;
+        .get_typed_func::<(), i32>(&mut store, "process_tensor_stream")
+        .context("MoonBit kernel must export 'process_tensor_stream'")?;
 
     println!("Moonlight Bridge: Connected to Kinetic Core.");
 
-    // 5. The Hot Loop (Simulated)
-    // In a real scenario, Python pushes data to a shared memory file, 
-    // and Rust memcpy's it into the Wasm memory here.
+    // 5. The Hot Loop (Simulated Neuro-Symbolic Stream)
     
     let iterations = 5;
+    println!("Moonlight Bridge: Starting {} kinetic cycles...", iterations);
+
+    let mut write_pos = 0;
+    let cap = 1024;
+
     for i in 0..iterations {
-        // Direct Memory Access (Unsafe "Beast" Mode)
-        let data = memory.data_mut(&mut store);
-        // Write mock sensor data (0..255) into the ring buffer area
-        data[0] = (i * 50) as u8; 
+        // Safe Memory Access
+        // We write 3 bytes (Vec3) into the buffer using the accessor.
+
+        let val_x = 200; // Trigger threshold
+        let val_y = 200;
+        let val_z = 200;
+
+        // Write X
+        set_byte.call(&mut store, (write_pos, val_x))?;
+        write_pos = (write_pos + 1) % cap;
+
+        // Write Y
+        set_byte.call(&mut store, (write_pos, val_y))?;
+        write_pos = (write_pos + 1) % cap;
+
+        // Write Z
+        set_byte.call(&mut store, (write_pos, val_z))?;
+        write_pos = (write_pos + 1) % cap;
+
+        // Sync Write Head
+        set_head.call(&mut store, write_pos)?;
         
         // Trigger Kinetic Core
         let processed = process_func.call(&mut store, ())?;
         
-        println!("[Cycle {}] Kernel Processed: {} bytes. (Neuronal Validation: OK)", i, processed);
+        println!("[Cycle {}] Kernel Processed: {} bytes. (Neuronal Validation: ACTIVE)", i, processed);
     }
 
+    println!("Moonlight Bridge: Mission Complete.");
     Ok(())
 }
