@@ -23,14 +23,18 @@ let ring : RingBuffer = {
 /// Safe Accessor: Host writes a byte to the buffer at a specific index.
 /// This prevents memory corruption by ensuring bounds checks.
 pub fn set_input_byte(index : Int, val : Int) -> Unit {
-  let safe_index = index % ring.capacity
-  // Convert Int to Byte (truncating)
-  ring.buffer[safe_index] = val.to_byte()
+  if index >= 0 {
+    let safe_index = index % ring.capacity
+    // Convert Int to Byte (truncating)
+    ring.buffer[safe_index] = val.to_byte()
+  }
 }
 
 /// Safe Accessor: Host updates the write head after filling the buffer.
 pub fn set_write_head(pos : Int) -> Unit {
-  ring.write_head = pos % ring.capacity
+  if pos >= 0 {
+    ring.write_head = pos % ring.capacity
+  }
 }
 
 /// Safe Accessor: Host can read the current read head position.
