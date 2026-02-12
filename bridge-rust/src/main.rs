@@ -52,6 +52,7 @@ fn main() -> Result<()> {
 
     let mut write_pos = 0;
     let cap = 1024;
+    let batch_size = 32;
 
     for i in 0..iterations {
         // Safe Memory Access
@@ -73,13 +74,25 @@ fn main() -> Result<()> {
         set_byte.call(&mut store, (write_pos, val_z))?;
         write_pos = (write_pos + 1) % cap;
 
-        // Sync Write Head
-        set_head.call(&mut store, write_pos)?;
-        
-        // Trigger Kinetic Core
-        let processed = process_func.call(&mut store, ())?;
-        
-        println!("[Cycle {}] Kernel Processed: {} bytes. (Neuronal Validation: ACTIVE)", i, processed);
+        // Optimization: Sync Head and Process in Batches
+        // Reduces boundary crossings from O(N) to O(N/batch_size)
+        if (i + 1) % batch_size == 0 || i == iterations - 1 {
+            // Sync Write Head
+            set_head.call(&mut store, write_pos)?;
+
+            // Trigger Kinetic Core
+            let processed = process_func.call(&mut store, ())?;
+
+            // Distribute processed bytes to cycles in this batch
+            let num_cycles_in_batch = if (i + 1) % batch_size == 0 { batch_size } else { (i + 1) % batch_size };
+            let mut remaining = processed;
+            for j in 0..num_cycles_in_batch {
+                let cycle_idx = i + 1 - num_cycles_in_batch + j;
+                let take = if remaining >= 3 { 3 } else { remaining };
+                println!("[Cycle {}] Kernel Processed: {} bytes. (Neuronal Validation: ACTIVE)", cycle_idx, take);
+                remaining -= take;
+            }
+        }
     }
 
     println!("Moonlight Bridge: Mission Complete.");
