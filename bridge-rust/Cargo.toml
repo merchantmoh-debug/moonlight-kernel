@@ -11,3 +11,9 @@ anyhow = "1.0"
 [build-dependencies]
 # We would use wit-bindgen here for full component model support
 # wit-bindgen-core = "0.10"
+
+[profile.release]
+lto = true
+codegen-units = 1
+panic = 'abort'
+opt-level = 3
