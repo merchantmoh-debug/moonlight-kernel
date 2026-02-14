@@ -1,5 +1,5 @@
 # ==============================================================================
-# Project Moonlight: Ark Synthesis Engine (V2.1 - Kinetic Edition)
+# Project Moonlight: Ark Synthesis Engine (V2.2 - Kinetic Edition)
 # ==============================================================================
 # "Let there be tensors."
 #
@@ -28,7 +28,7 @@ def generate_header():
     return """// Project Moonlight: Generated Kernel
 // Auto-synthesized by Ark Sovereign Engine
 // Target: Wasm-GC / Wasm-Linear
-// Version: 5.1.0 (Kinetic Realization)
+// Version: 5.2.0 (Kinetic Realization)
 
 package lib
 
