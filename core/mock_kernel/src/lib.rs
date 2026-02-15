@@ -59,6 +59,19 @@ pub extern "C" fn get_output_byte(index: i32) -> i32 {
     }
 }
 
+// --- Zero-Copy Interface (Genesis V3) ---
+// Returns the offset of the input buffer in Wasm Linear Memory.
+#[no_mangle]
+pub extern "C" fn get_input_buffer_offset() -> i32 {
+    std::ptr::addr_of!(BUFFER) as i32
+}
+
+// Returns the offset of the output buffer in Wasm Linear Memory.
+#[no_mangle]
+pub extern "C" fn get_output_buffer_offset() -> i32 {
+    std::ptr::addr_of!(OUTPUT_BUFFER) as i32
+}
+
 fn diff(read: usize, write: usize, cap: usize) -> usize {
     if write >= read {
         write - read
