@@ -10,6 +10,9 @@ pub static mut BUFFER: [u8; BUFFER_SIZE] = [0; BUFFER_SIZE];
 #[no_mangle]
 pub static mut OUTPUT_BUFFER: [u8; BUFFER_SIZE] = [0; BUFFER_SIZE];
 
+#[no_mangle]
+pub static mut CANARY: u8 = 0xAA;
+
 static mut READ_HEAD: usize = 0;
 static mut WRITE_HEAD: usize = 0;
 
@@ -91,6 +94,11 @@ fn diff(read: usize, write: usize, cap: usize) -> usize {
 pub extern "C" fn process_tensor_stream() -> i32 {
     unsafe {
         let mut processed = 0;
+
+        // Verify Canary integrity (Start of Cycle)
+        if CANARY != 0xAA {
+            panic!("KERNEL PANIC: Canary corrupted! Memory violation detected.");
+        }
 
         // Process in chunks of 3 (Vec3)
         while diff(READ_HEAD, WRITE_HEAD, BUFFER_SIZE) >= 3 {

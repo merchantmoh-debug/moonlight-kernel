@@ -4,6 +4,7 @@ import time
 import subprocess
 import os
 import argparse
+import psutil
 from rich.console import Console
 from rich.panel import Panel
 from rich.layout import Layout
@@ -99,25 +100,58 @@ class MoonlightAdapter:
                 text=True
             )
 
-            # Stream Output
-            with Live(console=console, refresh_per_second=10) as live:
+            # Dashboard State
+            logs = []
+            start_time = time.time()
+
+            layout = Layout()
+            layout.split_column(
+                Layout(name="header", size=3),
+                Layout(name="body", ratio=1),
+                Layout(name="footer", size=3)
+            )
+            layout["header"].update(Panel(f"Moonlight Bridge (Kernel: {os.path.basename(final_kernel)})", style="bold cyan"))
+
+            with Live(layout, console=console, refresh_per_second=4) as live:
                 while True:
                     output = process.stdout.readline()
                     if output == '' and process.poll() is not None:
                         break
+
                     if output:
-                        if "Neuronal Validation: ACTIVE" in output:
-                            console.print("[bold green]✔ NEURONAL VALIDATION: ACTIVE[/bold green]")
-                        elif "BENCHMARK" in output:
-                            console.print(f"[bold cyan]{output.strip()}[/bold cyan]")
-                        elif "CSV" in output:
-                            pass # suppress raw csv
-                        else:
-                            console.print(output.strip(), style="dim")
+                        line = output.strip()
+                        if "Neuronal Validation: ACTIVE" in line:
+                            logs.append("[bold green]✔ NEURONAL VALIDATION: ACTIVE[/bold green]")
+                        elif "BENCHMARK" in line:
+                            logs.append(f"[bold cyan]{line}[/bold cyan]")
+                        elif "CSV" in line:
+                            pass
+                        elif "[SECURITY]" in line:
+                            logs.append(f"[bold yellow]{line}[/bold yellow]")
+                        elif line:
+                            logs.append(f"[dim]{line}[/dim]")
+
+                        # Keep only last 20 logs
+                        if len(logs) > 20:
+                            logs.pop(0)
+
+                    # Update Layout
+                    log_content = "\n".join(logs)
+                    layout["body"].update(Panel(log_content, title="Kernel Log Stream", border_style="blue"))
+
+                    # Telemetry
+                    cpu = psutil.cpu_percent()
+                    ram = psutil.virtual_memory().percent
+                    elapsed = int(time.time() - start_time)
+
+                    stats = f"CPU: {cpu}% | RAM: {ram}% | T+{elapsed}s | Mode: {'BENCH' if bench_mode else 'KINETIC'}"
+                    layout["footer"].update(Panel(stats, title="System Telemetry", border_style="green"))
 
             if process.returncode != 0:
                  err = process.stderr.read()
                  console.print(f"[bold red]Bridge Crash:[/bold red]\n{err}")
+            else:
+                 console.print("[bold green]Bridge Protocol Complete.[/bold green]")
 
         except Exception as e:
             console.print(f"[bold red]Execution Error:[/bold red] {e}")

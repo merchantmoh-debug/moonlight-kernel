@@ -34,7 +34,8 @@ def test_integration():
         # Assertions
         # Note: adapter.py uses rich, so output might contain ANSI codes.
         # We check for substring presence which works even with ANSI codes usually.
-        if "Neuronal Validation: ACTIVE" not in output:
+        # TUI converts to uppercase: "NEURONAL VALIDATION: ACTIVE"
+        if "Neuronal Validation: ACTIVE" not in output and "NEURONAL VALIDATION: ACTIVE" not in output:
             print("FAILED: Neuronal Validation signature missing.")
             print("STDOUT:", output)
             sys.exit(1)
