@@ -112,6 +112,19 @@ fn main() -> Result<()> {
         .ok();
     let use_zero_copy = get_input_offset.is_some() && get_output_offset.is_some();
 
+    // SAFETY CHECK: Validate Memory Layout
+    if use_zero_copy {
+        let input_offset = get_input_offset.unwrap().call(&mut store, ())? as usize;
+        let output_offset = get_output_offset.unwrap().call(&mut store, ())? as usize;
+
+        validate_memory_layout(&memory, &store, input_offset, cap).context("Input Buffer Violation")?;
+        validate_memory_layout(&memory, &store, output_offset, cap).context("Output Buffer Violation")?;
+
+        if !bench_mode {
+            println!("Moonlight Bridge: [SECURITY] Memory Layout Validated.");
+        }
+    }
+
     // Function Exports
     let set_head = instance
         .get_typed_func::<i32, ()>(&mut store, "set_write_head")
@@ -264,6 +277,19 @@ fn main() -> Result<()> {
         println!("Moonlight Bridge: Mission Complete.");
     }
 
+    Ok(())
+}
+
+fn validate_memory_layout(memory: &Memory, store: &Store<()>, offset: usize, capacity: usize) -> Result<()> {
+    let mem_len = memory.data_size(store);
+    if offset.checked_add(capacity).map_or(true, |end| end > mem_len) {
+        bail!(
+            "Buffer Overflow Risk: Offset {} + Capacity {} > Memory Size {}",
+            offset,
+            capacity,
+            mem_len
+        );
+    }
     Ok(())
 }
 

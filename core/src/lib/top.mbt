@@ -63,6 +63,15 @@ pub fn get_output_byte(index : Int) -> Int {
   }
 }
 
+// --- Zero-Copy Interface (Future Proofing) ---
+// Note: Direct memory access requires FFI primitives not yet stable in this version.
+// Once stabilized, we will export input/output offsets.
+
+/// Safe Accessor: Host requests the buffer capacity.
+pub fn get_buffer_size() -> Int {
+  ring.capacity
+}
+
 /// The "Sovereign Logic": Process the buffer
 /// Returns the number of bytes processed.
 pub fn process_tensor_stream() -> Int {
