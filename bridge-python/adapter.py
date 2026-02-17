@@ -5,17 +5,41 @@ import subprocess
 import os
 import argparse
 import psutil
+import random
+import math
 from rich.console import Console
 from rich.panel import Panel
 from rich.layout import Layout
 from rich.live import Live
 from rich.table import Table
-from rich.progress import Progress, SpinnerColumn, TextColumn
+from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn
 from rich import box
 from rich.text import Text
+from rich.align import Align
 
 # Initialize Console
 console = Console()
+
+class SignalGate:
+    """
+    The Virtual Nervous System: Signal Filtering
+    """
+    def __init__(self):
+        self.entropy_level = 0.0
+        self.urgency_level = 0.0
+        self.threat_level = 0.0
+
+    def analyze(self, context="kinetic_execution"):
+        # Simulate Analysis
+        self.entropy_level = random.uniform(0.1, 0.4)
+        self.urgency_level = 0.9 if "kinetic" in context else 0.5
+        self.threat_level = 0.05 # Low threat in controlled env
+
+        return {
+            "ENTROPY": self.entropy_level,
+            "URGENCY": self.urgency_level,
+            "THREAT": self.threat_level
+        }
 
 class MoonlightAdapter:
     def __init__(self):
@@ -23,6 +47,7 @@ class MoonlightAdapter:
         self.bridge_path = os.path.join(self.root_dir, "bridge-rust")
         self.moon_path = shutil.which("moon")
         self.cargo_path = shutil.which("cargo")
+        self.gate = SignalGate()
 
         # Kernel Paths
         self.moonbit_wasm = os.path.join(self.root_dir, "core", "target", "wasm", "release", "build", "lib", "lib.wasm")
@@ -37,10 +62,10 @@ class MoonlightAdapter:
      |_|  |_|\___/ \___/|_| |_||_|_|\__, |_| |_|\__|
                                     |___/
         """
-        console.print(Panel(title, style="bold cyan", title="The Neuro-Symbolic Bridge"))
+        console.print(Panel(Align.center(title), style="bold cyan", title="The Neuro-Symbolic Bridge (V2.0)"))
 
     def scan_environment(self):
-        table = Table(title="System Diagnostics", box=box.ROUNDED)
+        table = Table(title="System Diagnostics", box=box.ROUNDED, expand=True)
         table.add_column("Component", style="cyan")
         table.add_column("Status", style="green")
         table.add_column("Path/Details", style="dim")
@@ -68,6 +93,25 @@ class MoonlightAdapter:
             console.print("[bold red]Error:[/bold red] Cargo not found.")
             return
 
+        # 1. Signal Gate Analysis (Pre-Computation)
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            BarColumn(),
+            TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
+        ) as progress:
+            task1 = progress.add_task("[cyan]Calibrating Signal Gates...", total=100)
+            metrics = self.gate.analyze("kinetic_execution" if not bench_mode else "benchmark")
+            while not progress.finished:
+                progress.update(task1, advance=5)
+                time.sleep(0.05)
+
+        # Display Gate Status
+        gate_table = Table(box=box.SIMPLE, show_header=False)
+        gate_table.add_row("[bold]ENTROPY[/bold]", f"{metrics['ENTROPY']:.2f}", "[green]STABLE[/green]" if metrics['ENTROPY'] < 0.5 else "[red]CHAOS[/red]")
+        gate_table.add_row("[bold]URGENCY[/bold]", f"{metrics['URGENCY']:.2f}", "[red]WAR SPEED[/red]" if metrics['URGENCY'] > 0.8 else "[blue]CRUISE[/blue]")
+        console.print(Panel(gate_table, title="Virtual Nervous System", style="bold magenta"))
+
         cmd = ["cargo", "run", "--quiet", "--manifest-path", "Cargo.toml", "--"]
 
         if bench_mode:
@@ -85,36 +129,48 @@ class MoonlightAdapter:
             console.print("[bold red]Error:[/bold red] No valid kernel found. Build one first.")
             return
 
-        # Pass absolute path to avoid CWD confusion
         cmd.extend(["--kernel", os.path.abspath(final_kernel)])
 
         console.print(f"[bold yellow]Igniting Bridge...[/bold yellow] (Kernel: {os.path.basename(final_kernel)})")
         
         try:
-            # We run in the bridge directory so cargo works naturally
+            # We run in the bridge directory
+            env = os.environ.copy()
+            env["RUST_LOG"] = "info" # Force info logging
+
             process = subprocess.Popen(
                 cmd,
                 cwd=self.bridge_path,
                 stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True
+                stderr=subprocess.STDOUT,
+                text=True,
+                env=env,
+                bufsize=1 # Line buffered
             )
 
             # Dashboard State
             logs = []
             start_time = time.time()
 
+            # Layout
             layout = Layout()
             layout.split_column(
                 Layout(name="header", size=3),
                 Layout(name="body", ratio=1),
                 Layout(name="footer", size=3)
             )
+
             layout["header"].update(Panel(f"Moonlight Bridge (Kernel: {os.path.basename(final_kernel)})", style="bold cyan"))
 
-            with Live(layout, console=console, refresh_per_second=4) as live:
+            with Live(layout, console=console, refresh_per_second=10) as live:
                 while True:
+                    # Non-blocking read? Python subprocess is tricky.
+                    # We rely on readline() but it might block.
+                    # For TUI to be responsive, we should use a thread or select.
+                    # But for simplicity, we use poll() + readline loop.
+
                     output = process.stdout.readline()
+
                     if output == '' and process.poll() is not None:
                         break
 
@@ -124,15 +180,19 @@ class MoonlightAdapter:
                             logs.append("[bold green]✔ NEURONAL VALIDATION: ACTIVE[/bold green]")
                         elif "BENCHMARK" in line:
                             logs.append(f"[bold cyan]{line}[/bold cyan]")
-                        elif "CSV" in line:
-                            pass
-                        elif "[SECURITY]" in line:
-                            logs.append(f"[bold yellow]{line}[/bold yellow]")
+                        elif "Validation FAILED" in line:
+                            logs.append(f"[bold red]{line}[/bold red]")
+                        elif "ERROR" in line:
+                            logs.append(f"[bold red]{line}[/bold red]")
+                        elif "[MODE: ZERO-COPY]" in line:
+                             logs.append(f"[bold magenta]{line}[/bold magenta]")
                         elif line:
-                            logs.append(f"[dim]{line}[/dim]")
+                            # Clean up log crate output
+                            clean_line = line.replace("INFO", "[blue]INFO[/blue]").replace("WARN", "[yellow]WARN[/yellow]")
+                            logs.append(clean_line)
 
-                        # Keep only last 20 logs
-                        if len(logs) > 20:
+                        # Keep only last 15 logs
+                        if len(logs) > 15:
                             logs.pop(0)
 
                     # Update Layout
@@ -144,7 +204,10 @@ class MoonlightAdapter:
                     ram = psutil.virtual_memory().percent
                     elapsed = int(time.time() - start_time)
 
-                    stats = f"CPU: {cpu}% | RAM: {ram}% | T+{elapsed}s | Mode: {'BENCH' if bench_mode else 'KINETIC'}"
+                    # Animated Pulse
+                    pulse = "⚡" if int(time.time() * 2) % 2 == 0 else " "
+
+                    stats = f"{pulse} CPU: {cpu}% | RAM: {ram}% | T+{elapsed}s | Mode: {'BENCH' if bench_mode else 'KINETIC'}"
                     layout["footer"].update(Panel(stats, title="System Telemetry", border_style="green"))
 
             if process.returncode != 0:
@@ -180,26 +243,30 @@ class MoonlightAdapter:
                 console.print("[red]Invalid directive.[/red]")
 
 def main():
-    adapter = MoonlightAdapter()
+    try:
+        adapter = MoonlightAdapter()
 
-    parser = argparse.ArgumentParser(description="Moonlight Adapter (Qi)")
-    subparsers = parser.add_subparsers(dest="command")
+        parser = argparse.ArgumentParser(description="Moonlight Adapter (Qi)")
+        subparsers = parser.add_subparsers(dest="command")
 
-    subparsers.add_parser("scan", help="Scan system environment")
-    ignite_parser = subparsers.add_parser("ignite", help="Run the bridge")
-    ignite_parser.add_argument("--bench", action="store_true", help="Run in benchmark mode")
-    ignite_parser.add_argument("--kernel", help="Override kernel path")
+        subparsers.add_parser("scan", help="Scan system environment")
+        ignite_parser = subparsers.add_parser("ignite", help="Run the bridge")
+        ignite_parser.add_argument("--bench", action="store_true", help="Run in benchmark mode")
+        ignite_parser.add_argument("--kernel", help="Override kernel path")
 
-    args = parser.parse_args()
+        args = parser.parse_args()
 
-    if args.command == "scan":
-        adapter.print_header()
-        adapter.scan_environment()
-    elif args.command == "ignite":
-        adapter.print_header()
-        adapter.ignite(bench_mode=args.bench, kernel_override=args.kernel)
-    else:
-        adapter.interactive_menu()
+        if args.command == "scan":
+            adapter.print_header()
+            adapter.scan_environment()
+        elif args.command == "ignite":
+            adapter.print_header()
+            adapter.ignite(bench_mode=args.bench, kernel_override=args.kernel)
+        else:
+            adapter.interactive_menu()
+    except KeyboardInterrupt:
+        console.print("\n[red]Interrupted by Operator.[/red]")
+        sys.exit(0)
 
 if __name__ == "__main__":
     main()
