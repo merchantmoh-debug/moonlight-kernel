@@ -23,6 +23,9 @@ struct MoonlightBridge {
     set_write_head: TypedFunc<i32, ()>,
     process_tensor_stream: TypedFunc<(), i32>,
 
+    // New Exports (V2)
+    vector_add_batch: Option<TypedFunc<i32, i32>>,
+
     // Legacy / Fallback
     set_input_3_bytes: Option<TypedFunc<(i32, i32, i32, i32), ()>>,
     get_output_byte: Option<TypedFunc<i32, i32>>,
@@ -85,6 +88,7 @@ impl MoonlightBridge {
             .get_typed_func::<(), i32>(&mut store, "process_tensor_stream")
             .context("Missing export: process_tensor_stream")?;
 
+        let vector_add_batch = instance.get_typed_func::<i32, i32>(&mut store, "vector_add_batch").ok();
         let set_input_3_bytes = instance.get_typed_func::<(i32, i32, i32, i32), ()>(&mut store, "set_input_3_bytes").ok();
         let get_output_byte = instance.get_typed_func::<i32, i32>(&mut store, "get_output_byte").ok();
 
@@ -97,6 +101,22 @@ impl MoonlightBridge {
              bail!("Memory Violation: Output Buffer exceeds Wasm memory bounds.");
         }
 
+        // Check for Overlap
+        // We assume contiguous buffers of size `cap`
+        let input_end = input_offset + cap;
+        let output_end = output_offset + cap;
+
+        let overlap = (input_offset < output_end) && (output_offset < input_end);
+        if overlap {
+             // In some cases (In-Place ops), overlap is desired.
+             // But for standard stream processing, it's a risk.
+             // We'll warn for now, or bail if strict.
+             // Given we have separate buffers in Mock, valid overlap implies error.
+             if input_offset != output_offset { // Exact match might be intentional "in-place"
+                 warn!("CRITICAL: Memory Overlap Detected between Input and Output Buffers! ({} vs {})", input_offset, output_offset);
+             }
+        }
+
         Ok(Self {
             store,
             memory,
@@ -105,6 +125,7 @@ impl MoonlightBridge {
             output_offset,
             set_write_head,
             process_tensor_stream,
+            vector_add_batch,
             set_input_3_bytes,
             get_output_byte,
         })
@@ -114,33 +135,8 @@ impl MoonlightBridge {
         let bytes_needed = count * 3;
         let end_pos = write_pos + bytes_needed;
 
-        if self.input_offset > 0 || self.cap >= 65536 {
-            // Assume Zero-Copy if offsets are valid or large buffer
-            // (Mock kernel returns 0 offset but uses global array, so we must be careful.
-            //  However, for this bridge, we trust the offset logic.
-            //  Wait, Mock kernel returned offset logic: addr_of!(BUFFER). That is NOT 0 usually.)
-
-            // If offsets are 0 and we are in Mock/Legacy, we might not have direct access correctly
-            // if we don't know the real offset.
-            // BUT: The Synthesized kernel returned 0.
-            // FIX: If offset is 0, we should probably fallback to function calls UNLESS we know 0 is valid.
-            // In Wasm, 0 is valid. But let's check `set_input_3_bytes` existence.
-
-            if let Some(func) = &self.set_input_3_bytes {
-                 // Hybrid / Fallback for safety if we aren't sure about offsets
-                 // Or just use the function for maximum compatibility in this demo.
-                 // For high perf, we want direct access.
-                 // Let's try direct access if we can.
-            }
-        }
-
-        // KINETIC PATH: Direct Memory Access (if possible)
-        // Check if we can write directly
+        // KINETIC PATH: Direct Memory Access
         let mem_slice = self.memory.data_mut(&mut self.store);
-
-        // Safety: We only write if we are sure about offsets.
-        // If offsets are 0, it might be the start of memory.
-        // Let's assume the kernel is well-formed.
 
         if end_pos <= self.cap {
             // Contiguous
@@ -186,11 +182,20 @@ impl MoonlightBridge {
             let processed_bytes = self.process_tensor_stream.call(&mut self.store, ())?;
             let processed_vecs = processed_bytes / 3;
 
-            // 4. Verify (Neuronal Validation)
+            // 4. Verify (Neuronal Validation) - BEFORE modification
             if verify_active && i == 0 {
                 self.verify_output(read_pos, processed_vecs as usize)?;
             }
 
+            // 5. Vector Ops (Optional)
+            if let Some(func) = &self.vector_add_batch {
+                if i % 10 == 0 && processed_vecs > 0 {
+                    func.call(&mut self.store, processed_vecs)?;
+                    if i == 0 {
+                         debug!("Vector Batch Addition: ACTIVE");
+                    }
+                }
+            }
             read_pos = (read_pos + processed_bytes as usize) % self.cap;
         }
 

@@ -162,53 +162,51 @@ class MoonlightAdapter:
 
             layout["header"].update(Panel(f"Moonlight Bridge (Kernel: {os.path.basename(final_kernel)})", style="bold cyan"))
 
-            with Live(layout, console=console, refresh_per_second=10) as live:
+            # HEADLESS CHECK: If not TTY, disable TUI to prevent pipe deadlock
+            if sys.stdout.isatty():
+                with Live(layout, console=console, refresh_per_second=10) as live:
+                    while True:
+                        output = process.stdout.readline()
+
+                        if output == '' and process.poll() is not None:
+                            break
+
+                        if output:
+                            line = output.strip()
+                            if "Neuronal Validation: ACTIVE" in line:
+                                logs.append("[bold green]✔ NEURONAL VALIDATION: ACTIVE[/bold green]")
+                            elif "BENCHMARK" in line:
+                                logs.append(f"[bold cyan]{line}[/bold cyan]")
+                            elif "Validation FAILED" in line:
+                                logs.append(f"[bold red]{line}[/bold red]")
+                            elif "ERROR" in line:
+                                logs.append(f"[bold red]{line}[/bold red]")
+                            elif "[MODE: ZERO-COPY]" in line:
+                                 logs.append(f"[bold magenta]{line}[/bold magenta]")
+                            elif line:
+                                clean_line = line.replace("INFO", "[blue]INFO[/blue]").replace("WARN", "[yellow]WARN[/yellow]")
+                                logs.append(clean_line)
+
+                            if len(logs) > 15:
+                                logs.pop(0)
+
+                        log_content = "\n".join(logs)
+                        layout["body"].update(Panel(log_content, title="Kernel Log Stream", border_style="blue"))
+
+                        cpu = psutil.cpu_percent()
+                        ram = psutil.virtual_memory().percent
+                        elapsed = int(time.time() - start_time)
+                        pulse = "⚡" if int(time.time() * 2) % 2 == 0 else " "
+                        stats = f"{pulse} CPU: {cpu}% | RAM: {ram}% | T+{elapsed}s | Mode: {'BENCH' if bench_mode else 'KINETIC'}"
+                        layout["footer"].update(Panel(stats, title="System Telemetry", border_style="green"))
+            else:
+                # HEADLESS MODE (For Tests)
                 while True:
-                    # Non-blocking read? Python subprocess is tricky.
-                    # We rely on readline() but it might block.
-                    # For TUI to be responsive, we should use a thread or select.
-                    # But for simplicity, we use poll() + readline loop.
-
                     output = process.stdout.readline()
-
                     if output == '' and process.poll() is not None:
                         break
-
                     if output:
-                        line = output.strip()
-                        if "Neuronal Validation: ACTIVE" in line:
-                            logs.append("[bold green]✔ NEURONAL VALIDATION: ACTIVE[/bold green]")
-                        elif "BENCHMARK" in line:
-                            logs.append(f"[bold cyan]{line}[/bold cyan]")
-                        elif "Validation FAILED" in line:
-                            logs.append(f"[bold red]{line}[/bold red]")
-                        elif "ERROR" in line:
-                            logs.append(f"[bold red]{line}[/bold red]")
-                        elif "[MODE: ZERO-COPY]" in line:
-                             logs.append(f"[bold magenta]{line}[/bold magenta]")
-                        elif line:
-                            # Clean up log crate output
-                            clean_line = line.replace("INFO", "[blue]INFO[/blue]").replace("WARN", "[yellow]WARN[/yellow]")
-                            logs.append(clean_line)
-
-                        # Keep only last 15 logs
-                        if len(logs) > 15:
-                            logs.pop(0)
-
-                    # Update Layout
-                    log_content = "\n".join(logs)
-                    layout["body"].update(Panel(log_content, title="Kernel Log Stream", border_style="blue"))
-
-                    # Telemetry
-                    cpu = psutil.cpu_percent()
-                    ram = psutil.virtual_memory().percent
-                    elapsed = int(time.time() - start_time)
-
-                    # Animated Pulse
-                    pulse = "⚡" if int(time.time() * 2) % 2 == 0 else " "
-
-                    stats = f"{pulse} CPU: {cpu}% | RAM: {ram}% | T+{elapsed}s | Mode: {'BENCH' if bench_mode else 'KINETIC'}"
-                    layout["footer"].update(Panel(stats, title="System Telemetry", border_style="green"))
+                        print(output.strip())
 
             if process.returncode != 0:
                  err = process.stderr.read()

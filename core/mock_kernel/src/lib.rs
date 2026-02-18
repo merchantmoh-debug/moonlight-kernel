@@ -90,6 +90,28 @@ fn diff(read: usize, write: usize, cap: usize) -> usize {
     }
 }
 
+#[inline(always)]
+unsafe fn process_single_vector(idx: usize) {
+    let x = BUFFER[idx] as f64;
+    let y = BUFFER[(idx + 1) % BUFFER_SIZE] as f64;
+    let z = BUFFER[(idx + 2) % BUFFER_SIZE] as f64;
+
+    // Normalize Logic
+    let len = (x * x + y * y + z * z).sqrt();
+    let (nx, ny, nz) = if len == 0.0 {
+        (x, y, z)
+    } else {
+        (x / len, y / len, z / len)
+    };
+
+    // Scale to visualize direction: (nx * 100 + 100)
+    // Range [-1, 1] -> [0, 200] approximately.
+    // Clamped to u8 range implicitly by cast.
+    OUTPUT_BUFFER[idx] = (nx * 100.0 + 100.0) as u8;
+    OUTPUT_BUFFER[(idx + 1) % BUFFER_SIZE] = (ny * 100.0 + 100.0) as u8;
+    OUTPUT_BUFFER[(idx + 2) % BUFFER_SIZE] = (nz * 100.0 + 100.0) as u8;
+}
+
 #[no_mangle]
 pub extern "C" fn process_tensor_stream() -> i32 {
     unsafe {
@@ -100,28 +122,23 @@ pub extern "C" fn process_tensor_stream() -> i32 {
             panic!("KERNEL PANIC: Canary corrupted! Memory violation detected.");
         }
 
-        // Process in chunks of 3 (Vec3)
-        while diff(READ_HEAD, WRITE_HEAD, BUFFER_SIZE) >= 3 {
+        // Process in chunks of 4 (12 bytes) (Loop Unrolling)
+        while diff(READ_HEAD, WRITE_HEAD, BUFFER_SIZE) >= 12 {
             let idx = READ_HEAD;
-            let x = BUFFER[idx] as f64;
-            let y = BUFFER[(idx + 1) % BUFFER_SIZE] as f64;
-            let z = BUFFER[(idx + 2) % BUFFER_SIZE] as f64;
 
-            // Normalize Logic
-            let len = (x * x + y * y + z * z).sqrt();
-            let (nx, ny, nz) = if len == 0.0 {
-                (x, y, z)
-            } else {
-                (x / len, y / len, z / len)
-            };
+            // Explicitly unroll 4 calls
+            process_single_vector(idx);
+            process_single_vector((idx + 3) % BUFFER_SIZE);
+            process_single_vector((idx + 6) % BUFFER_SIZE);
+            process_single_vector((idx + 9) % BUFFER_SIZE);
 
-            // Scale to visualize direction: (nx * 100 + 100)
-            // Range [-1, 1] -> [0, 200] approximately.
-            // Clamped to u8 range implicitly by cast.
-            OUTPUT_BUFFER[idx] = (nx * 100.0 + 100.0) as u8;
-            OUTPUT_BUFFER[(idx + 1) % BUFFER_SIZE] = (ny * 100.0 + 100.0) as u8;
-            OUTPUT_BUFFER[(idx + 2) % BUFFER_SIZE] = (nz * 100.0 + 100.0) as u8;
+            READ_HEAD = (READ_HEAD + 12) % BUFFER_SIZE;
+            processed += 12;
+        }
 
+        // Handle remaining (1-3 vectors)
+        while diff(READ_HEAD, WRITE_HEAD, BUFFER_SIZE) >= 3 {
+            process_single_vector(READ_HEAD);
             READ_HEAD = (READ_HEAD + 3) % BUFFER_SIZE;
             processed += 3;
         }
@@ -130,26 +147,54 @@ pub extern "C" fn process_tensor_stream() -> i32 {
     }
 }
 
+// New Function: Vector Addition (Batch)
+// Adds vectors from BUFFER (A) and OUTPUT_BUFFER (B) -> OUTPUT_BUFFER (Result)
+#[no_mangle]
+pub extern "C" fn vector_add_batch(count: i32) -> i32 {
+    unsafe {
+        let n = count as usize;
+        let mut processed = 0;
+
+        let mut current_head = READ_HEAD;
+
+        // Simple loop (no unrolling needed for now as it's memory bound)
+        for _ in 0..n {
+            let idx = current_head;
+            let idx_y = (idx + 1) % BUFFER_SIZE;
+            let idx_z = (idx + 2) % BUFFER_SIZE;
+
+            // Simple addition: Out = In + Out (Clamped)
+            let val_in_x = BUFFER[idx] as u16;
+            let val_out_x = OUTPUT_BUFFER[idx] as u16;
+            OUTPUT_BUFFER[idx] = ((val_in_x + val_out_x).min(255)) as u8;
+
+            let val_in_y = BUFFER[idx_y] as u16;
+            let val_out_y = OUTPUT_BUFFER[idx_y] as u16;
+            OUTPUT_BUFFER[idx_y] = ((val_in_y + val_out_y).min(255)) as u8;
+
+            let val_in_z = BUFFER[idx_z] as u16;
+            let val_out_z = OUTPUT_BUFFER[idx_z] as u16;
+            OUTPUT_BUFFER[idx_z] = ((val_in_z + val_out_z).min(255)) as u8;
+
+            current_head = (current_head + 3) % BUFFER_SIZE;
+            processed += 1;
+        }
+        processed as i32
+    }
+}
+
 // Simulated Heavy Compute: Matrix Multiplication (4x4)
-// This function doesn't use the RingBuffer but operates on fixed offsets to simulate
-// a pure compute kernel call.
 #[no_mangle]
 pub extern "C" fn matrix_multiply_4x4(a_offset: i32, b_offset: i32, out_offset: i32) {
     unsafe {
         // Simple O(N^3) implementation for 4x4 matrix
-        // Assuming offsets are within BUFFER
         let a_idx = (a_offset as usize) % BUFFER_SIZE;
         let b_idx = (b_offset as usize) % BUFFER_SIZE;
         let out_idx = (out_offset as usize) % BUFFER_SIZE;
 
-        // Safety: Ensure we don't read/write out of bounds
         if a_idx + 16 > BUFFER_SIZE || b_idx + 16 > BUFFER_SIZE || out_idx + 16 > BUFFER_SIZE {
             return;
         }
-
-        // We treat the buffer as flat f32 arrays, but here we only have u8.
-        // Let's pretend each u8 is a value for simplicity of the mock.
-        // Or we can just do some math on the u8s.
 
         for r in 0..4 {
             for c in 0..4 {
@@ -159,7 +204,6 @@ pub extern "C" fn matrix_multiply_4x4(a_offset: i32, b_offset: i32, out_offset: 
                     let b_val = BUFFER[b_idx + k * 4 + c] as u32;
                     sum += a_val * b_val;
                 }
-                // Store result modulo 255
                 OUTPUT_BUFFER[out_idx + r * 4 + c] = (sum % 255) as u8;
             }
         }
