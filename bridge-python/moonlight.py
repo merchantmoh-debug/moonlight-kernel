@@ -10,6 +10,9 @@ from rich.table import Table
 from rich.panel import Panel
 from rich.progress import Progress, SpinnerColumn, TextColumn
 
+# Ensure local imports work
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+
 console = Console()
 
 # --- FRAMEWORK ZERO: THE SOUND HEART ---
@@ -137,7 +140,7 @@ def run_bridge(bench=False, iterations=None):
         cmd,
         cwd=bridge_dir,
         stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        stderr=subprocess.STDOUT, # Merge stderr into stdout to prevent deadlock
         text=True,
         bufsize=1,
         universal_newlines=True
@@ -160,6 +163,33 @@ def run_bridge(bench=False, iterations=None):
         console.print(f"[bold red]Bridge Failed with code {process.returncode}[/]")
         console.print(process.stderr.read())
         sys.exit(process.returncode)
+
+def run_monitor_cmd():
+    """Ignites the bridge and connects the dashboard."""
+    console.print("[bold]Phase 4: Neuro-Symbolic Connection[/]")
+    root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    bridge_dir = os.path.join(root_dir, "bridge-rust")
+
+    # Run in benchmark mode for continuous output (high iteration count in bench mode)
+    cmd = ["cargo", "run", "--release", "--quiet", "--", "--bench"]
+
+    process = subprocess.Popen(
+        cmd,
+        cwd=bridge_dir,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        bufsize=1,
+        universal_newlines=True
+    )
+
+    try:
+        from dashboard import run_monitor
+        run_monitor(process)
+    except ImportError:
+        console.print("[red]Dashboard module failed to load. Streaming raw output...[/]")
+        for line in process.stdout:
+            print(line, end="")
 
 def run_tests():
     """Runs the integration test suite."""
@@ -191,6 +221,9 @@ def main():
     # Run Command
     run_parser = subparsers.add_parser("run", help="Run the bridge")
 
+    # Monitor Command
+    monitor_parser = subparsers.add_parser("monitor", help="Run Kinetic Dashboard")
+
     # Test Command
     test_parser = subparsers.add_parser("test", help="Run tests")
 
@@ -212,6 +245,9 @@ def main():
 
     elif args.command == "run":
         run_bridge()
+
+    elif args.command == "monitor":
+        run_monitor_cmd()
 
     elif args.command == "benchmark":
         run_bridge(bench=True)

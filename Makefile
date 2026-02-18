@@ -28,6 +28,10 @@ run:
 test:
 	$(PYTHON) bridge-python/moonlight.py test
 
+# Kinetic Dashboard
+monitor:
+	$(PYTHON) bridge-python/moonlight.py monitor
+
 # Benchmark Performance
 benchmark:
 	$(PYTHON) bridge-python/moonlight.py benchmark
