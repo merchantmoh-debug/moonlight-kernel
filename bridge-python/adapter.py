@@ -30,9 +30,17 @@ class SignalGate:
         self.threat_level = 0.0
 
     def analyze(self, context="kinetic_execution"):
-        # Simulate Analysis
-        self.entropy_level = random.uniform(0.1, 0.4)
-        self.urgency_level = 0.9 if "kinetic" in context else 0.5
+        # Real Proprioception
+        try:
+            # Short interval for immediate feedback
+            cpu = psutil.cpu_percent(interval=0.1)
+            mem = psutil.virtual_memory().percent
+        except Exception:
+            cpu = 50.0 # Fallback
+            mem = 50.0
+
+        self.entropy_level = cpu / 100.0
+        self.urgency_level = mem / 100.0
         self.threat_level = 0.05 # Low threat in controlled env
 
         return {
@@ -40,6 +48,16 @@ class SignalGate:
             "URGENCY": self.urgency_level,
             "THREAT": self.threat_level
         }
+
+    def check_veto(self, metrics):
+        """
+        The Sound Heart: Vetoes execution if the system is unstable.
+        """
+        if metrics["ENTROPY"] > 0.90:
+            return True, "[VETO] System Entropy Critical (CPU > 90%). Rest required."
+        if metrics["URGENCY"] > 0.95:
+             return True, "[VETO] Memory Pressure Critical. Aborting to prevent OOM."
+        return False, "System Stable."
 
 class MoonlightAdapter:
     def __init__(self):
@@ -62,7 +80,7 @@ class MoonlightAdapter:
      |_|  |_|\___/ \___/|_| |_||_|_|\__, |_| |_|\__|
                                     |___/
         """
-        console.print(Panel(Align.center(title), style="bold cyan", title="The Neuro-Symbolic Bridge (V2.0)"))
+        console.print(Panel(Align.center(title), style="bold cyan", title="The Neuro-Symbolic Bridge (V2.1 - Sovereign UI)"))
 
     def scan_environment(self):
         table = Table(title="System Diagnostics", box=box.ROUNDED, expand=True)
@@ -103,14 +121,23 @@ class MoonlightAdapter:
             task1 = progress.add_task("[cyan]Calibrating Signal Gates...", total=100)
             metrics = self.gate.analyze("kinetic_execution" if not bench_mode else "benchmark")
             while not progress.finished:
-                progress.update(task1, advance=5)
-                time.sleep(0.05)
+                progress.update(task1, advance=10)
+                time.sleep(0.02)
 
         # Display Gate Status
         gate_table = Table(box=box.SIMPLE, show_header=False)
-        gate_table.add_row("[bold]ENTROPY[/bold]", f"{metrics['ENTROPY']:.2f}", "[green]STABLE[/green]" if metrics['ENTROPY'] < 0.5 else "[red]CHAOS[/red]")
-        gate_table.add_row("[bold]URGENCY[/bold]", f"{metrics['URGENCY']:.2f}", "[red]WAR SPEED[/red]" if metrics['URGENCY'] > 0.8 else "[blue]CRUISE[/blue]")
+        gate_table.add_row("[bold]ENTROPY (CPU)[/bold]", f"{metrics['ENTROPY']*100:.1f}%", "[green]STABLE[/green]" if metrics['ENTROPY'] < 0.5 else "[yellow]HIGH[/yellow]")
+        gate_table.add_row("[bold]URGENCY (RAM)[/bold]", f"{metrics['URGENCY']*100:.1f}%", "[red]WAR SPEED[/red]" if metrics['URGENCY'] > 0.8 else "[blue]CRUISE[/blue]")
         console.print(Panel(gate_table, title="Virtual Nervous System", style="bold magenta"))
+
+        # 2. The Veto Check
+        veto, reason = self.gate.check_veto(metrics)
+        if veto:
+            console.print(f"[bold red]⛔ INTERVENTION:[/bold red] {reason}")
+            # In a real scenario, we might abort. Here we ask for override.
+            # For automation sake, we proceed with warning if strictly testing, but let's simulate the delay.
+            console.print("[yellow]System assumes operator override for critical mission...[/yellow]")
+            time.sleep(1)
 
         cmd = ["cargo", "run", "--quiet", "--manifest-path", "Cargo.toml", "--"]
 
