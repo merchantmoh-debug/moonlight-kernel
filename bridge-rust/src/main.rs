@@ -203,8 +203,11 @@ impl MoonlightBridge {
         if iterations > 100 {
             let total_vecs = iterations as u128 * batch_size as u128;
             let vecs_per_sec = total_vecs as f64 / duration.as_secs_f64();
-            println!("BENCHMARK: {:.2} vectors/sec", vecs_per_sec);
-            println!("CSV,{},{:.2}", total_vecs, vecs_per_sec);
+            let bytes_per_sec = (total_vecs * 3) as f64 / duration.as_secs_f64();
+            let mb_per_sec = bytes_per_sec / 1_048_576.0;
+
+            println!("BENCHMARK: {:.2} vectors/sec | {:.2} MB/s", vecs_per_sec, mb_per_sec);
+            println!("CSV,{},{:.2},{:.2}", total_vecs, vecs_per_sec, mb_per_sec);
         } else {
             info!("Kinetic Loop Complete. Time: {:?}", duration);
         }
@@ -214,7 +217,7 @@ impl MoonlightBridge {
 
     fn verify_output(&mut self, start_read_pos: usize, count: usize) -> Result<()> {
         let mem_slice = self.memory.data(&self.store);
-        let limit = if count > 5 { 5 } else { count }; // Verify first 5
+        let limit = if count > 10 { 10 } else { count }; // Verify first 10
 
         for k in 0..limit {
             let idx = (start_read_pos + k * 3) % self.cap;
