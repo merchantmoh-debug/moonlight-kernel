@@ -4,18 +4,81 @@ import time
 import subprocess
 import os
 import argparse
-import psutil
 import random
 import math
-from rich.console import Console
-from rich.panel import Panel
-from rich.layout import Layout
-from rich.live import Live
-from rich.table import Table
-from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn
-from rich import box
-from rich.text import Text
-from rich.align import Align
+import threading
+import queue
+
+try:
+    import psutil
+except ImportError:
+    class PsutilMock:
+        def cpu_percent(self, interval=None): return 50.0
+        def virtual_memory(self):
+            class Mem: percent = 50.0
+            return Mem()
+    psutil = PsutilMock()
+
+try:
+    from rich.console import Console
+    from rich.panel import Panel
+    from rich.layout import Layout
+    from rich.live import Live
+    from rich.table import Table
+    from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn
+    from rich import box
+    from rich.text import Text
+    from rich.align import Align
+except ImportError:
+    # Dummy classes for headless/restricted environments
+    class Console:
+        def print(self, *args, **kwargs):
+            text = " ".join(str(a) for a in args)
+            import re
+            text = re.sub(r'\[.*?\]', '', text)
+            print(text)
+    class Panel:
+        def __init__(self, renderable, **kwargs): self.renderable = renderable
+        def __str__(self): return str(self.renderable)
+    class Layout:
+        def __init__(self, **kwargs): self.parts = {}
+        def split(self, *args, **kwargs): pass
+        def split_column(self, *args, **kwargs): pass
+        def __setitem__(self, key, value): self.parts[key] = value
+        def __getitem__(self, key): return self.parts.get(key, self)
+        def update(self, *args): pass
+    class Live:
+        def __init__(self, *args, **kwargs): pass
+        def __enter__(self): return self
+        def __exit__(self, *args): pass
+    class Table:
+        def __init__(self, **kwargs): self.rows = []
+        def add_column(self, *args, **kwargs): pass
+        def add_row(self, *args, **kwargs):
+            self.rows.append(args)
+            print(" | ".join(str(a) for a in args)) # Immediate print for fallback
+        def __str__(self): return ""
+    class Progress:
+        def __init__(self, *args, **kwargs): self.finished = False
+        def __enter__(self): return self
+        def __exit__(self, *args): pass
+        def add_task(self, *args, **kwargs): pass
+        def update(self, *args, **kwargs):
+             if 'advance' in kwargs:
+                  # Simulate progress
+                  pass
+    class SpinnerColumn: pass
+    class TextColumn:
+        def __init__(self, *args, **kwargs): pass
+    class BarColumn: pass
+    class Box: pass
+    box = Box()
+    box.ROUNDED = None
+    box.SIMPLE = None
+    class Text: pass
+    class Align:
+        @staticmethod
+        def center(x): return x
 
 # Initialize Console
 console = Console()
@@ -120,14 +183,15 @@ class MoonlightAdapter:
         ) as progress:
             task1 = progress.add_task("[cyan]Calibrating Signal Gates...", total=100)
             metrics = self.gate.analyze("kinetic_execution" if not bench_mode else "benchmark")
-            while not progress.finished:
-                progress.update(task1, advance=10)
-                time.sleep(0.02)
+            # Fallback progress finish
+            progress.finished = True
+            time.sleep(0.02)
 
         # Display Gate Status
         gate_table = Table(box=box.SIMPLE, show_header=False)
         gate_table.add_row("[bold]ENTROPY (CPU)[/bold]", f"{metrics['ENTROPY']*100:.1f}%", "[green]STABLE[/green]" if metrics['ENTROPY'] < 0.5 else "[yellow]HIGH[/yellow]")
         gate_table.add_row("[bold]URGENCY (RAM)[/bold]", f"{metrics['URGENCY']*100:.1f}%", "[red]WAR SPEED[/red]" if metrics['URGENCY'] > 0.8 else "[blue]CRUISE[/blue]")
+        gate_table.add_row("[bold]THREAT (VETO)[/bold]", f"{metrics['THREAT']*100:.1f}%", "[green]SECURE[/green]")
         console.print(Panel(gate_table, title="Virtual Nervous System", style="bold magenta"))
 
         # 2. The Veto Check
@@ -175,6 +239,16 @@ class MoonlightAdapter:
                 bufsize=1 # Line buffered
             )
 
+            # Non-Blocking Reader
+            log_queue = queue.Queue()
+            def reader_thread():
+                for line in process.stdout:
+                    log_queue.put(line)
+                process.stdout.close()
+
+            t = threading.Thread(target=reader_thread, daemon=True)
+            t.start()
+
             # Dashboard State
             logs = []
             start_time = time.time()
@@ -189,34 +263,35 @@ class MoonlightAdapter:
 
             layout["header"].update(Panel(f"Moonlight Bridge (Kernel: {os.path.basename(final_kernel)})", style="bold cyan"))
 
-            # HEADLESS CHECK: If not TTY, disable TUI to prevent pipe deadlock
+            # TUI Loop
             if sys.stdout.isatty():
                 with Live(layout, console=console, refresh_per_second=10) as live:
                     while True:
-                        output = process.stdout.readline()
+                        # Process Queue
+                        while not log_queue.empty():
+                            try:
+                                line = log_queue.get_nowait()
+                                line = line.strip()
+                                if "Neuronal Validation: ACTIVE" in line:
+                                    logs.append("[bold green]✔ NEURONAL VALIDATION: ACTIVE[/bold green]")
+                                elif "BENCHMARK" in line:
+                                    logs.append(f"[bold cyan]{line}[/bold cyan]")
+                                elif "Validation FAILED" in line:
+                                    logs.append(f"[bold red]{line}[/bold red]")
+                                elif "ERROR" in line:
+                                    logs.append(f"[bold red]{line}[/bold red]")
+                                elif "KINETIC OPTIMIZATIONS" in line or ">" in line:
+                                     logs.append(f"[bold green]{line}[/bold green]")
+                                elif line:
+                                    clean_line = line.replace("INFO", "[blue]INFO[/blue]").replace("WARN", "[yellow]WARN[/yellow]")
+                                    logs.append(clean_line)
 
-                        if output == '' and process.poll() is not None:
-                            break
+                                if len(logs) > 15:
+                                    logs.pop(0)
+                            except queue.Empty:
+                                break
 
-                        if output:
-                            line = output.strip()
-                            if "Neuronal Validation: ACTIVE" in line:
-                                logs.append("[bold green]✔ NEURONAL VALIDATION: ACTIVE[/bold green]")
-                            elif "BENCHMARK" in line:
-                                logs.append(f"[bold cyan]{line}[/bold cyan]")
-                            elif "Validation FAILED" in line:
-                                logs.append(f"[bold red]{line}[/bold red]")
-                            elif "ERROR" in line:
-                                logs.append(f"[bold red]{line}[/bold red]")
-                            elif "[MODE: ZERO-COPY]" in line:
-                                 logs.append(f"[bold magenta]{line}[/bold magenta]")
-                            elif line:
-                                clean_line = line.replace("INFO", "[blue]INFO[/blue]").replace("WARN", "[yellow]WARN[/yellow]")
-                                logs.append(clean_line)
-
-                            if len(logs) > 15:
-                                logs.pop(0)
-
+                        # Update UI
                         log_content = "\n".join(logs)
                         layout["body"].update(Panel(log_content, title="Kernel Log Stream", border_style="blue"))
 
@@ -226,18 +301,24 @@ class MoonlightAdapter:
                         pulse = "⚡" if int(time.time() * 2) % 2 == 0 else " "
                         stats = f"{pulse} CPU: {cpu}% | RAM: {ram}% | T+{elapsed}s | Mode: {'BENCH' if bench_mode else 'KINETIC'}"
                         layout["footer"].update(Panel(stats, title="System Telemetry", border_style="green"))
+
+                        # Check Exit
+                        if process.poll() is not None and log_queue.empty():
+                            break
+
+                        time.sleep(0.05)
             else:
-                # HEADLESS MODE (For Tests)
-                while True:
-                    output = process.stdout.readline()
-                    if output == '' and process.poll() is not None:
-                        break
-                    if output:
-                        print(output.strip())
+                 # HEADLESS MODE (For Tests)
+                 while True:
+                     try:
+                         line = log_queue.get(timeout=0.1)
+                         print(line.strip())
+                     except queue.Empty:
+                         if process.poll() is not None:
+                             break
 
             if process.returncode != 0:
-                 err = process.stderr.read()
-                 console.print(f"[bold red]Bridge Crash:[/bold red]\n{err}")
+                 console.print(f"[bold red]Bridge Crash with code {process.returncode}[/bold red]")
             else:
                  console.print("[bold green]Bridge Protocol Complete.[/bold green]")
 

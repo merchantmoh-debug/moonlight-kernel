@@ -209,3 +209,38 @@ pub extern "C" fn matrix_multiply_4x4(a_offset: i32, b_offset: i32, out_offset: 
         }
     }
 }
+
+// New Function: Vector Dot Product (Batch)
+// Computes dot product of Input * Output for 'count' vectors
+#[no_mangle]
+pub extern "C" fn vector_dot_batch(count: i32) -> i32 {
+    unsafe {
+        let n = count as usize;
+        let mut processed = 0;
+        let mut dot_sum: i32 = 0;
+
+        let mut current_head = READ_HEAD;
+
+        for _ in 0..n {
+            let idx = current_head;
+            let idx_y = (idx + 1) % BUFFER_SIZE;
+            let idx_z = (idx + 2) % BUFFER_SIZE;
+
+            let in_x = BUFFER[idx] as i32;
+            let out_x = OUTPUT_BUFFER[idx] as i32;
+            dot_sum = dot_sum.wrapping_add(in_x * out_x);
+
+            let in_y = BUFFER[idx_y] as i32;
+            let out_y = OUTPUT_BUFFER[idx_y] as i32;
+            dot_sum = dot_sum.wrapping_add(in_y * out_y);
+
+            let in_z = BUFFER[idx_z] as i32;
+            let out_z = OUTPUT_BUFFER[idx_z] as i32;
+            dot_sum = dot_sum.wrapping_add(in_z * out_z);
+
+            current_head = (current_head + 3) % BUFFER_SIZE;
+            processed += 1;
+        }
+        dot_sum
+    }
+}

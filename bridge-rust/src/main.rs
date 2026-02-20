@@ -25,6 +25,7 @@ struct MoonlightBridge {
 
     // New Exports (V2)
     vector_add_batch: Option<TypedFunc<i32, i32>>,
+    vector_dot_batch: Option<TypedFunc<i32, i32>>,
 
     // Legacy / Fallback
     set_input_3_bytes: Option<TypedFunc<(i32, i32, i32, i32), ()>>,
@@ -89,8 +90,16 @@ impl MoonlightBridge {
             .context("Missing export: process_tensor_stream")?;
 
         let vector_add_batch = instance.get_typed_func::<i32, i32>(&mut store, "vector_add_batch").ok();
+        let vector_dot_batch = instance.get_typed_func::<i32, i32>(&mut store, "vector_dot_batch").ok();
         let set_input_3_bytes = instance.get_typed_func::<(i32, i32, i32, i32), ()>(&mut store, "set_input_3_bytes").ok();
         let get_output_byte = instance.get_typed_func::<i32, i32>(&mut store, "get_output_byte").ok();
+
+        // Kinetic Optimization Check
+        info!("--- KINETIC OPTIMIZATIONS ---");
+        info!("> Zero-Copy Mode:    {}", if input_offset > 0 { "ACTIVE" } else { "INACTIVE" });
+        info!("> Batch Vector Add:  {}", if vector_add_batch.is_some() { "ACTIVE" } else { "INACTIVE" });
+        info!("> Batch Vector Dot:  {}", if vector_dot_batch.is_some() { "ACTIVE" } else { "INACTIVE" });
+        info!("-----------------------------");
 
         // 4. Validate Memory Layout
         let mem_size = memory.data_size(&store);
@@ -126,6 +135,7 @@ impl MoonlightBridge {
             set_write_head,
             process_tensor_stream,
             vector_add_batch,
+            vector_dot_batch,
             set_input_3_bytes,
             get_output_byte,
         })
@@ -196,6 +206,16 @@ impl MoonlightBridge {
                     }
                 }
             }
+
+            if let Some(func) = &self.vector_dot_batch {
+                if i % 20 == 0 && processed_vecs > 0 {
+                    func.call(&mut self.store, processed_vecs)?;
+                    if i == 0 {
+                         debug!("Vector Batch Dot Product: ACTIVE");
+                    }
+                }
+            }
+
             read_pos = (read_pos + processed_bytes as usize) % self.cap;
         }
 
