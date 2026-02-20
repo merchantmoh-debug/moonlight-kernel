@@ -185,6 +185,77 @@ pub fn process_tensor_stream() -> Int {
 
   processed
 }
+
+// --- Kinetic Upgrades (V2) ---
+
+fn min_byte(val : Int) -> Byte {
+  if val > 255 {
+    b'\\xFF'
+  } else {
+    val.to_byte()
+  }
+}
+
+pub fn vector_add_batch(count : Int) -> Int {
+  let mut processed = 0
+  let mut current = read_head
+
+  // Note: This logic assumes we iterate from current read_head
+  // For 'count' vectors.
+
+  while processed < count {
+     let idx = current % buffer_size
+     let idx_y = (current + 1) % buffer_size
+     let idx_z = (current + 2) % buffer_size
+
+     let in_x = input_buffer[idx].to_int()
+     let out_x = output_buffer[idx].to_int()
+     output_buffer[idx] = min_byte(in_x + out_x)
+
+     let in_y = input_buffer[idx_y].to_int()
+     let out_y = output_buffer[idx_y].to_int()
+     output_buffer[idx_y] = min_byte(in_y + out_y)
+
+     let in_z = input_buffer[idx_z].to_int()
+     let out_z = output_buffer[idx_z].to_int()
+     output_buffer[idx_z] = min_byte(in_z + out_z)
+
+     current = current + 3
+     processed = processed + 1
+  }
+
+  processed
+}
+
+pub fn vector_dot_batch(count : Int) -> Int {
+  let mut processed = 0
+  let mut current = read_head
+  let mut dot_sum = 0
+
+  while processed < count {
+     let idx = current % buffer_size
+     let idx_y = (current + 1) % buffer_size
+     let idx_z = (current + 2) % buffer_size
+
+     let in_x = input_buffer[idx].to_int()
+     let out_x = output_buffer[idx].to_int()
+     dot_sum = dot_sum + (in_x * out_x)
+
+     let in_y = input_buffer[idx_y].to_int()
+     let out_y = output_buffer[idx_y].to_int()
+     dot_sum = dot_sum + (in_y * out_y)
+
+     let in_z = input_buffer[idx_z].to_int()
+     let out_z = output_buffer[idx_z].to_int()
+     dot_sum = dot_sum + (in_z * out_z)
+
+     current = current + 3
+     processed = processed + 1
+  }
+
+  // Just to return something dependent on computation
+  dot_sum
+}
 """
 
 def main():
