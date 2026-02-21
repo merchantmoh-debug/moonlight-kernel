@@ -8,6 +8,7 @@
 
 import time
 import random
+from concurrent.futures import ThreadPoolExecutor
 
 class SovereignWorker:
     def __init__(self, id):
@@ -39,20 +40,20 @@ class TheOcean:
         print("=======================================\n")
 
         # 1. Connect
-        for w in self.workers:
-            w.join_network()
+        with ThreadPoolExecutor(max_workers=len(self.workers)) as executor:
+            list(executor.map(lambda w: w.join_network(), self.workers))
 
         # 2. Train Loop
-        for step in range(1, 4):
-            print(f"\n--- Global Step {step} ---")
-            total_loss = 0
-            for w in self.workers:
-                total_loss += w.train(step)
-            
-            avg_loss = total_loss / len(self.workers)
-            self.global_model_accuracy += (1.0 / avg_loss) * 0.1
-            print(f">>> CRITICAL: Aggregating Encrypted Gradients... Model Accuracy: {self.global_model_accuracy:.2f}%")
-            time.sleep(0.5)
+        with ThreadPoolExecutor(max_workers=len(self.workers)) as executor:
+            for step in range(1, 4):
+                print(f"\n--- Global Step {step} ---")
+                losses = list(executor.map(lambda w: w.train(step), self.workers))
+                total_loss = sum(losses)
+
+                avg_loss = total_loss / len(self.workers)
+                self.global_model_accuracy += (1.0 / avg_loss) * 0.1
+                print(f">>> CRITICAL: Aggregating Encrypted Gradients... Model Accuracy: {self.global_model_accuracy:.2f}%")
+                time.sleep(0.5)
 
         print("\n=== PROTOCOL COMPLETE ===")
         print("The Swarm has learned.")
