@@ -12,7 +12,7 @@ def test_kinetic_bridge():
     try:
         # Rebuild first to ensure latest binary
         print("Building...")
-        subprocess.run([sys.executable, "bridge-python/moonlight.py", "build", "--mock"], check=True, capture_output=True)
+        subprocess.run([sys.executable, "bridge-python/moonlight.py", "build", "--mock"], check=True, capture_output=True, shell=False)
 
         print("Running Bridge...")
         result = subprocess.run(
@@ -20,7 +20,8 @@ def test_kinetic_bridge():
             check=True,
             capture_output=True,
             text=True,
-            env=env
+            env=env,
+            shell=False
         )
         output = result.stdout
         # env_logger prints to stderr usually

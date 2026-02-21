@@ -69,7 +69,8 @@ def run_command(cmd, cwd=None, description="Executing"):
                 cwd=cwd,
                 check=True,
                 capture_output=True,
-                text=True
+                text=True,
+                shell=False
             )
             return result.stdout
         except subprocess.CalledProcessError as e:
@@ -143,7 +144,8 @@ def run_bridge(bench=False, iterations=None):
         stderr=subprocess.STDOUT, # Merge stderr into stdout to prevent deadlock
         text=True,
         bufsize=1,
-        universal_newlines=True
+        universal_newlines=True,
+        shell=False
     )
 
     # Simple output streaming
@@ -180,7 +182,8 @@ def run_monitor_cmd():
         stderr=subprocess.PIPE,
         text=True,
         bufsize=1,
-        universal_newlines=True
+        universal_newlines=True,
+        shell=False
     )
 
     try:
