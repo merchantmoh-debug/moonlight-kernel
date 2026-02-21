@@ -236,7 +236,8 @@ class MoonlightAdapter:
                 stderr=subprocess.STDOUT,
                 text=True,
                 env=env,
-                bufsize=1 # Line buffered
+                bufsize=1, # Line buffered
+                shell=False
             )
 
             # Non-Blocking Reader

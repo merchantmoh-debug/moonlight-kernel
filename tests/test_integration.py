@@ -20,7 +20,8 @@ def test_integration():
             [sys.executable, adapter_path, "ignite"],
             capture_output=True,
             text=True,
-            timeout=30 # Safety timeout
+            timeout=30, # Safety timeout
+            shell=False
         )
 
         output = result.stdout
