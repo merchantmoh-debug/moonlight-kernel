@@ -243,6 +243,45 @@ pub fn vector_add_batch(count : Int) -> Int {
   processed
 }
 
+/// New Function: Vector Dot Product (Batch)
+/// Computes dot product of Input * Output for 'count' vectors
+pub fn vector_dot_batch(count : Int) -> Int {
+  let mut dot_sum = 0
+  let mut current_head = read_head
+  let mut i = 0
+
+  while i < count {
+    let idx = current_head
+
+    let in_x = input_buffer[idx].to_int()
+    let out_x = output_buffer[idx].to_int()
+    dot_sum = dot_sum + in_x * out_x
+
+    let idx_y = (idx + 1) % buffer_size
+    let in_y = input_buffer[idx_y].to_int()
+    let out_y = output_buffer[idx_y].to_int()
+    dot_sum = dot_sum + in_y * out_y
+
+    let idx_z = (idx + 2) % buffer_size
+    let in_z = input_buffer[idx_z].to_int()
+    let out_z = output_buffer[idx_z].to_int()
+    dot_sum = dot_sum + in_z * out_z
+
+    current_head = (current_head + 3) % buffer_size
+    i = i + 1
+  }
+  dot_sum
+}
+
+/// Check Integrity (Canary)
+pub fn check_integrity() -> Int {
+  if canary == b'\xAA' {
+    1
+  } else {
+    0
+  }
+}
+
 pub fn main() -> Unit {
   println("Moonlight Kernel: Initialized.")
 }

@@ -198,10 +198,7 @@ class MoonlightAdapter:
         veto, reason = self.gate.check_veto(metrics)
         if veto:
             console.print(f"[bold red]⛔ INTERVENTION:[/bold red] {reason}")
-            # In a real scenario, we might abort. Here we ask for override.
-            # For automation sake, we proceed with warning if strictly testing, but let's simulate the delay.
-            console.print("[yellow]System assumes operator override for critical mission...[/yellow]")
-            time.sleep(1)
+            raise SystemError(f"KERNEL PANIC: {reason}")
 
         cmd = ["cargo", "run", "--quiet", "--manifest-path", "Cargo.toml", "--"]
 
@@ -253,6 +250,7 @@ class MoonlightAdapter:
             # Dashboard State
             logs = []
             start_time = time.time()
+            last_bench_str = ""
 
             # Layout
             layout = Layout()
@@ -275,6 +273,16 @@ class MoonlightAdapter:
                                 line = line.strip()
                                 if "Neuronal Validation: ACTIVE" in line:
                                     logs.append("[bold green]✔ NEURONAL VALIDATION: ACTIVE[/bold green]")
+                                elif "BENCHMARK_DATA:" in line:
+                                    try:
+                                        # Parse: BENCHMARK_DATA: vectors_sec=123.45, mb_sec=12.34
+                                        parts = line.split(":")[1].strip().split(",")
+                                        vecs = parts[0].split("=")[1]
+                                        mbs = parts[1].split("=")[1]
+                                        last_bench_str = f" | Speed: {vecs} v/s"
+                                        logs.append(f"[bold green]🚀 TELEMETRY: {vecs} vec/s ({mbs} MB/s)[/bold green]")
+                                    except Exception:
+                                        logs.append(f"[bold yellow]⚠ PARSE ERROR: {line}[/bold yellow]")
                                 elif "BENCHMARK" in line:
                                     logs.append(f"[bold cyan]{line}[/bold cyan]")
                                 elif "Validation FAILED" in line:
@@ -300,7 +308,7 @@ class MoonlightAdapter:
                         ram = psutil.virtual_memory().percent
                         elapsed = int(time.time() - start_time)
                         pulse = "⚡" if int(time.time() * 2) % 2 == 0 else " "
-                        stats = f"{pulse} CPU: {cpu}% | RAM: {ram}% | T+{elapsed}s | Mode: {'BENCH' if bench_mode else 'KINETIC'}"
+                        stats = f"{pulse} CPU: {cpu}% | RAM: {ram}% | T+{elapsed}s | Mode: {'BENCH' if bench_mode else 'KINETIC'}{last_bench_str}"
                         layout["footer"].update(Panel(stats, title="System Telemetry", border_style="green"))
 
                         # Check Exit
