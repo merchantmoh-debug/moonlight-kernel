@@ -26,6 +26,7 @@ struct MoonlightBridge {
     // New Exports (V2)
     vector_add_batch: Option<TypedFunc<i32, i32>>,
     vector_dot_batch: Option<TypedFunc<i32, i32>>,
+    check_integrity: Option<TypedFunc<(), i32>>,
 
     // Legacy / Fallback
     set_input_3_bytes: Option<TypedFunc<(i32, i32, i32, i32), ()>>,
@@ -33,8 +34,8 @@ struct MoonlightBridge {
 }
 
 impl MoonlightBridge {
-    fn ignite(kernel_path: &str) -> Result<Self> {
-        info!("Igniting Bridge with Kernel: {}", kernel_path);
+    fn ignite(kernel_path: &str, strict_mode: bool) -> Result<Self> {
+        info!("Igniting Bridge with Kernel: {} (Strict: {})", kernel_path, strict_mode);
 
         let mut config = Config::new();
         config.wasm_multi_memory(true);
@@ -91,14 +92,23 @@ impl MoonlightBridge {
 
         let vector_add_batch = instance.get_typed_func::<i32, i32>(&mut store, "vector_add_batch").ok();
         let vector_dot_batch = instance.get_typed_func::<i32, i32>(&mut store, "vector_dot_batch").ok();
+        let check_integrity = instance.get_typed_func::<(), i32>(&mut store, "check_integrity").ok();
         let set_input_3_bytes = instance.get_typed_func::<(i32, i32, i32, i32), ()>(&mut store, "set_input_3_bytes").ok();
         let get_output_byte = instance.get_typed_func::<i32, i32>(&mut store, "get_output_byte").ok();
+
+        // Strict Mode Enforcement
+        if strict_mode {
+            if vector_add_batch.is_none() { bail!("STRICT MODE: 'vector_add_batch' missing!"); }
+            if vector_dot_batch.is_none() { bail!("STRICT MODE: 'vector_dot_batch' missing!"); }
+            if check_integrity.is_none() { bail!("STRICT MODE: 'check_integrity' missing!"); }
+        }
 
         // Kinetic Optimization Check
         info!("--- KINETIC OPTIMIZATIONS ---");
         info!("> Zero-Copy Mode:    {}", if input_offset > 0 { "ACTIVE" } else { "INACTIVE" });
         info!("> Batch Vector Add:  {}", if vector_add_batch.is_some() { "ACTIVE" } else { "INACTIVE" });
         info!("> Batch Vector Dot:  {}", if vector_dot_batch.is_some() { "ACTIVE" } else { "INACTIVE" });
+        info!("> Integrity Check:   {}", if check_integrity.is_some() { "ACTIVE" } else { "INACTIVE" });
         info!("-----------------------------");
 
         // 4. Validate Memory Layout
@@ -136,6 +146,7 @@ impl MoonlightBridge {
             process_tensor_stream,
             vector_add_batch,
             vector_dot_batch,
+            check_integrity,
             set_input_3_bytes,
             get_output_byte,
         })
@@ -176,6 +187,14 @@ impl MoonlightBridge {
     }
 
     fn run_kinetic_loop(&mut self, iterations: usize, batch_size: usize, verify_active: bool) -> Result<()> {
+        // Integrity Check (Start)
+        if let Some(check) = &self.check_integrity {
+             let status = check.call(&mut self.store, ())?;
+             if status == 0 {
+                 bail!("KERNEL PANIC: Integrity Check Failed on Startup! (Canary Corrupted)");
+             }
+        }
+
         let mut write_pos = 0;
         let mut read_pos = 0;
 
@@ -227,9 +246,19 @@ impl MoonlightBridge {
             let mb_per_sec = bytes_per_sec / 1_048_576.0;
 
             println!("BENCHMARK: {:.2} vectors/sec | {:.2} MB/s", vecs_per_sec, mb_per_sec);
-            println!("CSV,{},{:.2},{:.2}", total_vecs, vecs_per_sec, mb_per_sec);
+            println!("BENCHMARK_DATA: vectors_sec={:.2}, mb_sec={:.2}", vecs_per_sec, mb_per_sec);
         } else {
             info!("Kinetic Loop Complete. Time: {:?}", duration);
+        }
+
+        // Integrity Check (End)
+        if let Some(check) = &self.check_integrity {
+             let status = check.call(&mut self.store, ())?;
+             if status == 0 {
+                 bail!("KERNEL PANIC: Integrity Check Failed after Kinetic Loop! (Canary Corrupted)");
+             } else if verify_active {
+                 info!("Integrity Check: PASS");
+             }
         }
 
         Ok(())
@@ -273,6 +302,7 @@ fn main() -> Result<()> {
 
     let args: Vec<String> = env::args().collect();
     let bench_mode = args.iter().any(|a| a == "--bench");
+    let strict_mode = args.iter().any(|a| a == "--strict");
 
     let mut kernel_path = None;
     let mut i = 1;
@@ -291,7 +321,7 @@ fn main() -> Result<()> {
         }
     });
 
-    let mut bridge = MoonlightBridge::ignite(&path)?;
+    let mut bridge = MoonlightBridge::ignite(&path, strict_mode)?;
 
     let iterations = if bench_mode { 100_000 } else { 5 };
     let batch_size = if bridge.cap >= 65536 { 1024 } else { 32 };
