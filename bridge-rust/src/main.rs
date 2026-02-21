@@ -25,6 +25,7 @@ struct MoonlightBridge {
 
     // New Exports (V2)
     vector_add_batch: Option<TypedFunc<i32, i32>>,
+    vector_dot_batch: Option<TypedFunc<i32, i32>>,
 
     // Legacy / Fallback
     set_input_3_bytes: Option<TypedFunc<(i32, i32, i32, i32), ()>>,
@@ -89,8 +90,16 @@ impl MoonlightBridge {
             .context("Missing export: process_tensor_stream")?;
 
         let vector_add_batch = instance.get_typed_func::<i32, i32>(&mut store, "vector_add_batch").ok();
+        let vector_dot_batch = instance.get_typed_func::<i32, i32>(&mut store, "vector_dot_batch").ok();
         let set_input_3_bytes = instance.get_typed_func::<(i32, i32, i32, i32), ()>(&mut store, "set_input_3_bytes").ok();
         let get_output_byte = instance.get_typed_func::<i32, i32>(&mut store, "get_output_byte").ok();
+
+        // Kinetic Optimization Check
+        info!("--- KINETIC OPTIMIZATIONS ---");
+        info!("> Zero-Copy Mode:    {}", if input_offset > 0 { "ACTIVE" } else { "INACTIVE" });
+        info!("> Batch Vector Add:  {}", if vector_add_batch.is_some() { "ACTIVE" } else { "INACTIVE" });
+        info!("> Batch Vector Dot:  {}", if vector_dot_batch.is_some() { "ACTIVE" } else { "INACTIVE" });
+        info!("-----------------------------");
 
         // 4. Validate Memory Layout
         let mem_size = memory.data_size(&store);
@@ -126,6 +135,7 @@ impl MoonlightBridge {
             set_write_head,
             process_tensor_stream,
             vector_add_batch,
+            vector_dot_batch,
             set_input_3_bytes,
             get_output_byte,
         })
@@ -196,6 +206,16 @@ impl MoonlightBridge {
                     }
                 }
             }
+
+            if let Some(func) = &self.vector_dot_batch {
+                if i % 20 == 0 && processed_vecs > 0 {
+                    func.call(&mut self.store, processed_vecs)?;
+                    if i == 0 {
+                         debug!("Vector Batch Dot Product: ACTIVE");
+                    }
+                }
+            }
+
             read_pos = (read_pos + processed_bytes as usize) % self.cap;
         }
 
@@ -203,8 +223,11 @@ impl MoonlightBridge {
         if iterations > 100 {
             let total_vecs = iterations as u128 * batch_size as u128;
             let vecs_per_sec = total_vecs as f64 / duration.as_secs_f64();
-            println!("BENCHMARK: {:.2} vectors/sec", vecs_per_sec);
-            println!("CSV,{},{:.2}", total_vecs, vecs_per_sec);
+            let bytes_per_sec = (total_vecs * 3) as f64 / duration.as_secs_f64();
+            let mb_per_sec = bytes_per_sec / 1_048_576.0;
+
+            println!("BENCHMARK: {:.2} vectors/sec | {:.2} MB/s", vecs_per_sec, mb_per_sec);
+            println!("CSV,{},{:.2},{:.2}", total_vecs, vecs_per_sec, mb_per_sec);
         } else {
             info!("Kinetic Loop Complete. Time: {:?}", duration);
         }
@@ -214,7 +237,7 @@ impl MoonlightBridge {
 
     fn verify_output(&mut self, start_read_pos: usize, count: usize) -> Result<()> {
         let mem_slice = self.memory.data(&self.store);
-        let limit = if count > 5 { 5 } else { count }; // Verify first 5
+        let limit = if count > 10 { 10 } else { count }; // Verify first 10
 
         for k in 0..limit {
             let idx = (start_read_pos + k * 3) % self.cap;
