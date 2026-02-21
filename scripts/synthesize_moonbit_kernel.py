@@ -117,12 +117,62 @@ fn Vec3::new(x : Double, y : Double, z : Double) -> Vec3 {
   { x, y, z }
 }
 
+fn Vec3::dot(self : Vec3, other : Vec3) -> Double {
+  self.x * other.x + self.y * other.y + self.z * other.z
+}
+
 fn normalize(self : Vec3) -> Vec3 {
   let len = (self.x * self.x + self.y * self.y + self.z * self.z).sqrt()
   if len == 0.0 {
     self
   } else {
     { x: self.x / len, y: self.y / len, z: self.z / len }
+  }
+}
+
+// --- Matrix Math ---
+
+struct Matrix_Float64 {
+  rows : Int
+  cols : Int
+  data : FixedArray[Double]
+}
+
+fn Matrix_Float64::new(rows : Int, cols : Int) -> Matrix_Float64 {
+  { rows, cols, data: FixedArray::make(rows * cols, 0.0) }
+}
+
+fn Matrix_Float64::set(self : Matrix_Float64, row : Int, col : Int, val : Double) -> Unit {
+  self.data[row * self.cols + col] = val
+}
+
+fn Matrix_Float64::get(self : Matrix_Float64, row : Int, col : Int) -> Double {
+  self.data[row * self.cols + col]
+}
+
+fn Matrix_Float64::add(self : Matrix_Float64, other : Matrix_Float64) -> Matrix_Float64 {
+  let res = Matrix_Float64::new(self.rows, self.cols)
+  let mut i = 0
+  while i < self.rows * self.cols {
+    res.data[i] = self.data[i] + other.data[i]
+    i = i + 1
+  }
+  res
+}
+
+struct Mat4x4 {
+  m00 : Double; m01 : Double; m02 : Double; m03 : Double
+  m10 : Double; m11 : Double; m12 : Double; m13 : Double
+  m20 : Double; m21 : Double; m22 : Double; m23 : Double
+  m30 : Double; m31 : Double; m32 : Double; m33 : Double
+}
+
+fn Mat4x4::identity() -> Mat4x4 {
+  {
+    m00: 1.0, m01: 0.0, m02: 0.0, m03: 0.0,
+    m10: 0.0, m11: 1.0, m12: 0.0, m13: 0.0,
+    m20: 0.0, m21: 0.0, m22: 1.0, m23: 0.0,
+    m30: 0.0, m31: 0.0, m32: 0.0, m33: 1.0,
   }
 }
 """
@@ -186,75 +236,43 @@ pub fn process_tensor_stream() -> Int {
   processed
 }
 
-// --- Kinetic Upgrades (V2) ---
-
-fn min_byte(val : Int) -> Byte {
-  if val > 255 {
-    b'\\xFF'
-  } else {
-    val.to_byte()
-  }
-}
-
+/// New Function: Vector Addition (Batch)
+/// Adds vectors from input_buffer and output_buffer -> output_buffer (Result)
 pub fn vector_add_batch(count : Int) -> Int {
   let mut processed = 0
-  let mut current = read_head
+  let mut current_head = read_head
 
-  // Note: This logic assumes we iterate from current read_head
-  // For 'count' vectors.
+  let mut i = 0
+  while i < count {
+    let idx = current_head
 
-  while processed < count {
-     let idx = current % buffer_size
-     let idx_y = (current + 1) % buffer_size
-     let idx_z = (current + 2) % buffer_size
+    // Simple addition: Out = In + Out (Clamped)
+    let val_in_x = input_buffer[idx].to_int()
+    let val_out_x = output_buffer[idx].to_int()
+    let res_x = if val_in_x + val_out_x > 255 { 255 } else { val_in_x + val_out_x }
+    output_buffer[idx] = res_x.to_byte()
 
-     let in_x = input_buffer[idx].to_int()
-     let out_x = output_buffer[idx].to_int()
-     output_buffer[idx] = min_byte(in_x + out_x)
+    let idx_y = (idx + 1) % buffer_size
+    let val_in_y = input_buffer[idx_y].to_int()
+    let val_out_y = output_buffer[idx_y].to_int()
+    let res_y = if val_in_y + val_out_y > 255 { 255 } else { val_in_y + val_out_y }
+    output_buffer[idx_y] = res_y.to_byte()
 
-     let in_y = input_buffer[idx_y].to_int()
-     let out_y = output_buffer[idx_y].to_int()
-     output_buffer[idx_y] = min_byte(in_y + out_y)
+    let idx_z = (idx + 2) % buffer_size
+    let val_in_z = input_buffer[idx_z].to_int()
+    let val_out_z = output_buffer[idx_z].to_int()
+    let res_z = if val_in_z + val_out_z > 255 { 255 } else { val_in_z + val_out_z }
+    output_buffer[idx_z] = res_z.to_byte()
 
-     let in_z = input_buffer[idx_z].to_int()
-     let out_z = output_buffer[idx_z].to_int()
-     output_buffer[idx_z] = min_byte(in_z + out_z)
-
-     current = current + 3
-     processed = processed + 1
+    current_head = (current_head + 3) % buffer_size
+    processed = processed + 1
+    i = i + 1
   }
-
   processed
 }
 
-pub fn vector_dot_batch(count : Int) -> Int {
-  let mut processed = 0
-  let mut current = read_head
-  let mut dot_sum = 0
-
-  while processed < count {
-     let idx = current % buffer_size
-     let idx_y = (current + 1) % buffer_size
-     let idx_z = (current + 2) % buffer_size
-
-     let in_x = input_buffer[idx].to_int()
-     let out_x = output_buffer[idx].to_int()
-     dot_sum = dot_sum + (in_x * out_x)
-
-     let in_y = input_buffer[idx_y].to_int()
-     let out_y = output_buffer[idx_y].to_int()
-     dot_sum = dot_sum + (in_y * out_y)
-
-     let in_z = input_buffer[idx_z].to_int()
-     let out_z = output_buffer[idx_z].to_int()
-     dot_sum = dot_sum + (in_z * out_z)
-
-     current = current + 3
-     processed = processed + 1
-  }
-
-  // Just to return something dependent on computation
-  dot_sum
+pub fn main() -> Unit {
+  println("Moonlight Kernel: Initialized.")
 }
 """
 
