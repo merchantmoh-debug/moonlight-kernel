@@ -112,77 +112,6 @@ def build_kernel(mock_mode=False):
     )
     console.print("[bold green]Build Complete.[/]")
 
-def run_bridge(bench=False, iterations=None):
-    """Ignites the bridge."""
-    root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    bridge_dir = os.path.join(root_dir, "bridge-rust")
-
-    cmd = ["cargo", "run", "--release", "--quiet", "--"]
-    if bench:
-        cmd.append("--bench")
-    if iterations:
-        cmd.extend([str(iterations)])
-
-    console.print(f"[bold]Phase 3: Ignition ({'Benchmark' if bench else 'Kinetic Run'})[/]")
-
-    # We stream output for run mode
-    process = subprocess.Popen(
-        cmd,
-        cwd=bridge_dir,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT, # Merge stderr into stdout to prevent deadlock
-        text=True,
-        bufsize=1,
-        universal_newlines=True,
-        shell=False
-    )
-
-    # Simple output streaming
-    for line in process.stdout:
-        line = line.strip()
-        if "BENCHMARK" in line:
-            console.print(f"[bold cyan]{line}[/]")
-        elif "ERROR" in line:
-            console.print(f"[bold red]{line}[/]")
-        elif "Active" in line or "Connected" in line:
-            console.print(f"[green]{line}[/]")
-        else:
-            console.print(line)
-
-    process.wait()
-    if process.returncode != 0:
-        console.print(f"[bold red]Bridge Failed with code {process.returncode}[/]")
-        console.print(process.stderr.read())
-        sys.exit(process.returncode)
-
-def run_monitor_cmd():
-    """Ignites the bridge and connects the dashboard."""
-    console.print("[bold]Phase 4: Neuro-Symbolic Connection[/]")
-    root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    bridge_dir = os.path.join(root_dir, "bridge-rust")
-
-    # Run in benchmark mode for continuous output (high iteration count in bench mode)
-    cmd = ["cargo", "run", "--release", "--quiet", "--", "--bench"]
-
-    process = subprocess.Popen(
-        cmd,
-        cwd=bridge_dir,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        bufsize=1,
-        universal_newlines=True,
-        shell=False
-    )
-
-    try:
-        from dashboard import run_monitor
-        run_monitor(process)
-    except ImportError:
-        console.print("[red]Dashboard module failed to load. Streaming raw output...[/]")
-        for line in process.stdout:
-            print(line, end="")
-
 def run_tests():
     """Runs the integration test suite."""
     console.print("[bold]Phase 4: Verification[/]")
@@ -209,10 +138,10 @@ def main():
     build_parser = subparsers.add_parser("build", help="Build the kernel and bridge")
     build_parser.add_argument("--mock", action="store_true", help="Force mock kernel build")
 
-    run_parser = subparsers.add_parser("run", help="Run the bridge")
-    monitor_parser = subparsers.add_parser("monitor", help="Run Kinetic Dashboard")
-    bench_parser = subparsers.add_parser("benchmark", help="Run performance benchmarks")
-    test_parser = subparsers.add_parser("test", help="Run tests")
+    subparsers.add_parser("run", help="Run the bridge")
+    subparsers.add_parser("monitor", help="Run Kinetic Dashboard")
+    subparsers.add_parser("benchmark", help="Run performance benchmarks")
+    subparsers.add_parser("test", help="Run tests")
 
     args = parser.parse_args()
 

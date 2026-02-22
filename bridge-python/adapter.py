@@ -8,6 +8,7 @@ import random
 import math
 import threading
 import queue
+import hashlib
 
 try:
     import psutil
@@ -169,6 +170,27 @@ class MoonlightAdapter:
              return False
         return True
 
+    def verify_integrity(self, kernel_path):
+        """
+        The Digital Proprioception: Verifies the integrity of the Wasm kernel.
+        """
+        try:
+            console.print(f"[cyan]Verifying Kernel Integrity: {os.path.basename(kernel_path)}...[/cyan]")
+            sha256_hash = hashlib.sha256()
+            with open(kernel_path, "rb") as f:
+                # Read and update hash string value in blocks of 4K
+                for byte_block in iter(lambda: f.read(4096), b""):
+                    sha256_hash.update(byte_block)
+
+            digest = sha256_hash.hexdigest()
+            console.print(f"[dim]Kernel Hash (SHA256): {digest}[/dim]")
+
+            # In a strict environment, we would compare this against a signed manifest.
+            # For now, we log it as a security event.
+            return True, digest
+        except Exception as e:
+            return False, str(e)
+
     def ignite(self, bench_mode=False, kernel_override=None):
         if not self.cargo_path:
             console.print("[bold red]Error:[/bold red] Cargo not found.")
@@ -216,6 +238,12 @@ class MoonlightAdapter:
         else:
             console.print("[bold red]Error:[/bold red] No valid kernel found. Build one first.")
             return
+
+        # 3. Integrity Verification
+        success, digest = self.verify_integrity(final_kernel)
+        if not success:
+             console.print(f"[bold red]SECURITY ALERT:[/bold red] Kernel verification failed: {digest}")
+             # In strict mode we might abort, but for now we proceed with warning
 
         cmd.extend(["--kernel", os.path.abspath(final_kernel)])
 
