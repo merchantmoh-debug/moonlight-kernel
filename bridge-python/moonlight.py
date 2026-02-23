@@ -44,7 +44,7 @@ def print_header(mode="NEUTRAL"):
     color = "green" if mode == "KINETIC" else "blue"
     console.print(Panel(f"[bold {color}]MOONLIGHT KERNEL v2.2 (KINETIC EDITION)[/]", subtitle="The Neuro-Symbolic Polyglot Bridge"))
 
-def run_command(cmd, cwd=None, description="Executing"):
+def run_command(cmd, cwd=None, description="Executing", ignore_error=False):
     """Executes a shell command with visual feedback."""
     with Progress(
         SpinnerColumn(),
@@ -63,17 +63,43 @@ def run_command(cmd, cwd=None, description="Executing"):
             )
             return result.stdout
         except subprocess.CalledProcessError as e:
+            if ignore_error:
+                console.print(f"[yellow]Warning in '{description}': {e.stderr.strip()}[/]")
+                return None
             console.print(f"[bold red]ERROR in '{description}':[/]")
             console.print(e.stderr)
             sys.exit(1)
+
+def check_wasm_target():
+    try:
+        out = subprocess.check_output(["rustup", "target", "list", "--installed"], text=True)
+        return "wasm32-unknown-unknown" in out
+    except:
+        return False
 
 def build_kernel(mock_mode=False):
     """Builds the Wasm Kernel and Rust Bridge."""
     console.print("[bold]Phase 1: Synthesis & Compilation[/]")
 
     root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    has_moon = bool(shutil.which("moon"))
+    has_wasm_target = check_wasm_target()
 
-    if mock_mode:
+    if not mock_mode and has_moon:
+        # Real build (if moon exists)
+        console.print("[cyan]Synthesizing MoonBit Kernel...[/]")
+        run_command(
+            [sys.executable, "scripts/synthesize_moonbit_kernel.py"],
+            cwd=root_dir,
+            description="Synthesizing Logic"
+        )
+        console.print("[cyan]Compiling MoonBit Core...[/]")
+        run_command(
+            ["moon", "build", "--target", "wasm"],
+            cwd=os.path.join(root_dir, "core"),
+            description="Compiling MoonBit"
+        )
+    elif has_wasm_target:
         console.print("[yellow]Building MOCK KERNEL (Rust implementation of MoonBit logic)...[/]")
         run_command(
             ["cargo", "build", "--target", "wasm32-unknown-unknown", "--release"],
@@ -90,19 +116,8 @@ def build_kernel(mock_mode=False):
         )
         console.print("[green]Mock Kernel Deployed.[/]")
     else:
-        # Real build (if moon exists)
-        console.print("[cyan]Synthesizing MoonBit Kernel...[/]")
-        run_command(
-            [sys.executable, "scripts/synthesize_moonbit_kernel.py"],
-            cwd=root_dir,
-            description="Synthesizing Logic"
-        )
-        console.print("[cyan]Compiling MoonBit Core...[/]")
-        run_command(
-            ["moon", "build", "--target", "wasm"],
-            cwd=os.path.join(root_dir, "core"),
-            description="Compiling MoonBit"
-        )
+        console.print("[bold red]SKIPPING WASM BUILD:[/bold red] Neither 'moon' nor 'wasm32-unknown-unknown' target found.")
+        console.print("[yellow]System will default to NATIVE KERNEL (Iron Lung Mode).[/yellow]")
 
     console.print("[bold]Phase 2: Bridge Construction[/]")
     run_command(
@@ -138,9 +153,15 @@ def main():
     build_parser = subparsers.add_parser("build", help="Build the kernel and bridge")
     build_parser.add_argument("--mock", action="store_true", help="Force mock kernel build")
 
-    subparsers.add_parser("run", help="Run the bridge")
-    subparsers.add_parser("monitor", help="Run Kinetic Dashboard")
-    subparsers.add_parser("benchmark", help="Run performance benchmarks")
+    run_parser = subparsers.add_parser("run", help="Run the bridge")
+    run_parser.add_argument("--strict", action="store_true", help="Enable Strict Mode (Veto Enforcement)")
+
+    monitor_parser = subparsers.add_parser("monitor", help="Run Kinetic Dashboard")
+    monitor_parser.add_argument("--strict", action="store_true", help="Enable Strict Mode")
+
+    bench_parser = subparsers.add_parser("benchmark", help="Run performance benchmarks")
+    bench_parser.add_argument("--strict", action="store_true", help="Enable Strict Mode")
+
     subparsers.add_parser("test", help="Run tests")
 
     args = parser.parse_args()
@@ -154,20 +175,22 @@ def main():
         build_kernel(mock_mode=mock_mode)
 
     elif args.command == "run":
-        adapter.ignite(bench_mode=False)
+        adapter.ignite(bench_mode=False, strict=args.strict)
 
     elif args.command == "monitor":
         # Monitor is now same as run in adapter (it has built-in TUI)
-        adapter.ignite(bench_mode=False)
+        adapter.ignite(bench_mode=False, strict=args.strict)
 
     elif args.command == "benchmark":
-        adapter.ignite(bench_mode=True)
+        adapter.ignite(bench_mode=True, strict=args.strict)
 
     elif args.command == "test":
         # Check artifact
-        if not os.path.exists("core/target/wasm/release/build/lib/lib.wasm"):
-             console.print("[yellow]Artifact missing. Building Mock Kernel first...[/]")
+        # We try to build native bridge if not built
+        if not os.path.exists("bridge-rust/target/release/moonlight-bridge"):
+             console.print("[yellow]Bridge binary missing. Building...[/]")
              build_kernel(mock_mode=True)
+
         run_tests()
 
 if __name__ == "__main__":

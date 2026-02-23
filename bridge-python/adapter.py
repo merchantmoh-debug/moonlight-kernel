@@ -97,7 +97,8 @@ class SignalGate:
         # Real Proprioception
         try:
             # Short interval for immediate feedback
-            cpu = psutil.cpu_percent(interval=0.1)
+            # Using interval=None for non-blocking in loops
+            cpu = psutil.cpu_percent(interval=None)
             mem = psutil.virtual_memory().percent
         except Exception:
             cpu = 50.0 # Fallback
@@ -118,9 +119,9 @@ class SignalGate:
         The Sound Heart: Vetoes execution if the system is unstable.
         """
         if metrics["ENTROPY"] > 0.90:
-            return True, "[VETO] System Entropy Critical (CPU > 90%). Rest required."
+            return True, f"[VETO] System Entropy Critical (CPU {metrics['ENTROPY']*100:.1f}% > 90%). Rest required."
         if metrics["URGENCY"] > 0.95:
-             return True, "[VETO] Memory Pressure Critical. Aborting to prevent OOM."
+             return True, f"[VETO] Memory Pressure Critical (RAM {metrics['URGENCY']*100:.1f}% > 95%). Aborting to prevent OOM."
         return False, "System Stable."
 
 class MoonlightAdapter:
@@ -185,18 +186,16 @@ class MoonlightAdapter:
             digest = sha256_hash.hexdigest()
             console.print(f"[dim]Kernel Hash (SHA256): {digest}[/dim]")
 
-            # In a strict environment, we would compare this against a signed manifest.
-            # For now, we log it as a security event.
             return True, digest
         except Exception as e:
             return False, str(e)
 
-    def ignite(self, bench_mode=False, kernel_override=None):
+    def ignite(self, bench_mode=False, kernel_override=None, strict=False):
         if not self.cargo_path:
             console.print("[bold red]Error:[/bold red] Cargo not found.")
             return
 
-        # 1. Signal Gate Analysis (Pre-Computation)
+        # 1. Signal Gate Analysis (Initial)
         with Progress(
             SpinnerColumn(),
             TextColumn("[progress.description]{task.description}"),
@@ -205,7 +204,6 @@ class MoonlightAdapter:
         ) as progress:
             task1 = progress.add_task("[cyan]Calibrating Signal Gates...", total=100)
             metrics = self.gate.analyze("kinetic_execution" if not bench_mode else "benchmark")
-            # Fallback progress finish
             progress.finished = True
             time.sleep(0.02)
 
@@ -216,38 +214,50 @@ class MoonlightAdapter:
         gate_table.add_row("[bold]THREAT (VETO)[/bold]", f"{metrics['THREAT']*100:.1f}%", "[green]SECURE[/green]")
         console.print(Panel(gate_table, title="Virtual Nervous System", style="bold magenta"))
 
-        # 2. The Veto Check
+        # 2. The Veto Check (Initial)
         veto, reason = self.gate.check_veto(metrics)
-        if veto:
-            console.print(f"[bold red]⛔ INTERVENTION:[/bold red] {reason}")
+        if veto and strict:
+            console.print(f"[bold red]⛔ INTERVENTION (STRICT):[/bold red] {reason}")
             raise SystemError(f"KERNEL PANIC: {reason}")
+        elif veto:
+            console.print(f"[bold yellow]⚠ WARNING:[/bold yellow] {reason} (Proceeding in non-strict mode)")
 
         cmd = ["cargo", "run", "--quiet", "--manifest-path", "Cargo.toml", "--"]
 
         if bench_mode:
             cmd.append("--bench")
 
+        if strict:
+            cmd.append("--strict")
+
         # Kernel Selection Logic
         final_kernel = None
+        kernel_name = "Native Kernel (Iron Lung)"
+
         if kernel_override:
             final_kernel = kernel_override
+            kernel_name = os.path.basename(final_kernel)
         elif os.path.exists(self.moonbit_wasm):
             final_kernel = self.moonbit_wasm
+            kernel_name = "MoonBit Core"
         elif os.path.exists(self.mock_wasm):
             final_kernel = self.mock_wasm
+            kernel_name = "Mock Kernel (Wasm)"
         else:
-            console.print("[bold red]Error:[/bold red] No valid kernel found. Build one first.")
-            return
+            console.print("[yellow]Notice:[/yellow] No Wasm artifacts found. Falling back to Native Mode.")
+            # final_kernel remains None
 
-        # 3. Integrity Verification
-        success, digest = self.verify_integrity(final_kernel)
-        if not success:
-             console.print(f"[bold red]SECURITY ALERT:[/bold red] Kernel verification failed: {digest}")
-             # In strict mode we might abort, but for now we proceed with warning
+        # 3. Integrity Verification (Only if Wasm)
+        if final_kernel:
+            success, digest = self.verify_integrity(final_kernel)
+            if not success:
+                 console.print(f"[bold red]SECURITY ALERT:[/bold red] Kernel verification failed: {digest}")
+                 if strict:
+                     raise SystemError("KERNEL PANIC: Integrity Check Failed")
 
-        cmd.extend(["--kernel", os.path.abspath(final_kernel)])
+            cmd.extend(["--kernel", os.path.abspath(final_kernel)])
 
-        console.print(f"[bold yellow]Igniting Bridge...[/bold yellow] (Kernel: {os.path.basename(final_kernel)})")
+        console.print(f"[bold yellow]Igniting Bridge...[/bold yellow] (Kernel: {kernel_name})")
         
         try:
             # We run in the bridge directory
@@ -288,7 +298,7 @@ class MoonlightAdapter:
                 Layout(name="footer", size=3)
             )
 
-            layout["header"].update(Panel(f"Moonlight Bridge (Kernel: {os.path.basename(final_kernel)})", style="bold cyan"))
+            layout["header"].update(Panel(f"Moonlight Bridge (Kernel: {kernel_name})", style="bold cyan"))
 
             # TUI Loop
             if sys.stdout.isatty():
@@ -328,16 +338,32 @@ class MoonlightAdapter:
                             except queue.Empty:
                                 break
 
+                        # Live Telemetry Update
+                        metrics = self.gate.analyze()
+                        veto, reason = self.gate.check_veto(metrics)
+
+                        if veto and strict:
+                             process.terminate()
+                             raise SystemError(f"KERNEL PANIC (Runtime): {reason}")
+
                         # Update UI
                         log_content = "\n".join(logs)
                         layout["body"].update(Panel(log_content, title="Kernel Log Stream", border_style="blue"))
 
-                        cpu = psutil.cpu_percent()
-                        ram = psutil.virtual_memory().percent
+                        cpu = metrics["ENTROPY"] * 100
+                        ram = metrics["URGENCY"] * 100
+                        threat = metrics["THREAT"] * 100
+
                         elapsed = int(time.time() - start_time)
                         pulse = "⚡" if int(time.time() * 2) % 2 == 0 else " "
-                        stats = f"{pulse} CPU: {cpu}% | RAM: {ram}% | T+{elapsed}s | Mode: {'BENCH' if bench_mode else 'KINETIC'}{last_bench_str}"
-                        layout["footer"].update(Panel(stats, title="System Telemetry", border_style="green"))
+
+                        stats = f"{pulse} CPU: {cpu:.1f}% | RAM: {ram:.1f}% | Threat: {threat:.1f}% | T+{elapsed}s | Mode: {'BENCH' if bench_mode else 'KINETIC'}{last_bench_str}"
+
+                        style = "green"
+                        if veto: style = "red"
+                        elif cpu > 80: style = "yellow"
+
+                        layout["footer"].update(Panel(stats, title="System Telemetry (Signal Gate)", border_style=style))
 
                         # Check Exit
                         if process.poll() is not None and log_queue.empty():
@@ -361,6 +387,8 @@ class MoonlightAdapter:
 
         except Exception as e:
             console.print(f"[bold red]Execution Error:[/bold red] {e}")
+            if strict:
+                raise # Re-raise for upper level handling
 
     def interactive_menu(self):
         self.print_header()
@@ -396,6 +424,7 @@ def main():
         ignite_parser = subparsers.add_parser("ignite", help="Run the bridge")
         ignite_parser.add_argument("--bench", action="store_true", help="Run in benchmark mode")
         ignite_parser.add_argument("--kernel", help="Override kernel path")
+        ignite_parser.add_argument("--strict", action="store_true", help="Enforce Signal Gate Veto")
 
         args = parser.parse_args()
 
@@ -404,7 +433,7 @@ def main():
             adapter.scan_environment()
         elif args.command == "ignite":
             adapter.print_header()
-            adapter.ignite(bench_mode=args.bench, kernel_override=args.kernel)
+            adapter.ignite(bench_mode=args.bench, kernel_override=args.kernel, strict=args.strict)
         else:
             adapter.interactive_menu()
     except KeyboardInterrupt:
