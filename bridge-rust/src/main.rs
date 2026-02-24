@@ -254,6 +254,7 @@ impl KernelBackend for WasmBackend {
 
 struct MoonlightBridge {
     backend: Box<dyn KernelBackend>,
+    noise_buffer: Vec<u8>,
 }
 
 impl MoonlightBridge {
@@ -270,7 +271,14 @@ impl MoonlightBridge {
             }
         };
 
-        let bridge = Self { backend };
+        // Optimization: Pre-allocate noise buffer
+        // Default batch is 1024, so 3072 bytes. We allocate 4KB to be safe.
+        let mut noise_buffer = vec![0u8; 4096];
+        for (i, byte) in noise_buffer.iter_mut().enumerate() {
+            *byte = ((i % 255) ^ 0xAA) as u8;
+        }
+
+        let bridge = Self { backend, noise_buffer };
 
         // Validation of Layout
         let cap = bridge.backend.get_cap();
@@ -284,28 +292,31 @@ impl MoonlightBridge {
         let input_offset = self.backend.get_input_offset();
 
         let bytes_needed = count * 3;
-        let end_pos = write_pos + bytes_needed;
 
-        // Optimized Data Generation (Simulate Noise)
-        // Instead of fill(200), we generate a pattern.
-        // We create a temporary buffer to minimize JNI/Wasm calls? No, we are in Rust.
-        let mut data = vec![0u8; bytes_needed];
-        for (i, byte) in data.iter_mut().enumerate() {
-            *byte = ((i % 255) ^ 0xAA) as u8; // Simple XOR pattern
+        // Lazy resize if batch size increases
+        if self.noise_buffer.len() < bytes_needed {
+             self.noise_buffer.resize(bytes_needed, 0);
+             // Regenerate pattern for new size (simplified for speed, just fill tail)
+             for i in 0..bytes_needed {
+                 self.noise_buffer[i] = ((i % 255) ^ 0xAA) as u8;
+             }
         }
+
+        let end_pos = write_pos + bytes_needed;
+        let src = &self.noise_buffer[0..bytes_needed];
 
         if end_pos <= cap {
             let start = input_offset + write_pos;
-            self.backend.write_bytes(start, &data)?;
+            self.backend.write_bytes(start, src)?;
         } else {
             let first_chunk = cap - write_pos;
-            let second_chunk = bytes_needed - first_chunk;
+            // let second_chunk = bytes_needed - first_chunk; // Unused variable warning fix
 
             let start1 = input_offset + write_pos;
-            self.backend.write_bytes(start1, &data[0..first_chunk])?;
+            self.backend.write_bytes(start1, &src[0..first_chunk])?;
 
             let start2 = input_offset;
-            self.backend.write_bytes(start2, &data[first_chunk..])?;
+            self.backend.write_bytes(start2, &src[first_chunk..])?;
         }
 
         Ok(end_pos % cap)
