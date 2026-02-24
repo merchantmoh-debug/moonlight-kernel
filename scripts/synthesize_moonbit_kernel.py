@@ -189,47 +189,56 @@ fn diff(read : Int, write : Int, cap : Int) -> Int {
   }
 }
 
-fn process_single_vector(idx : Int) -> Unit {
-  // 1. Read Raw Bytes
+fn process_vector_inline(idx : Int) -> Unit {
+  // Unrolled & Inlined Logic (Kinetic V3.2)
+  // Masking: 65535 (0xFFFF) for Modulo
+
+  let mask = 65535
+
   let x = input_buffer[idx].to_int().to_double()
-  let y = input_buffer[(idx + 1) % buffer_size].to_int().to_double()
-  let z = input_buffer[(idx + 2) % buffer_size].to_int().to_double()
+  let y = input_buffer[(idx + 1).land(mask)].to_int().to_double()
+  let z = input_buffer[(idx + 2).land(mask)].to_int().to_double()
 
-  // 2. Compute (Neuronal Activation)
-  let v = Vec3::new(x, y, z)
-  let vn = v.normalize()
+  let len_sq = x * x + y * y + z * z
+  let len = len_sq.sqrt()
 
-  // 3. Quantize Output
-  let ox = (vn.x * 100.0 + 100.0).to_int()
-  let oy = (vn.y * 100.0 + 100.0).to_int()
-  let oz = (vn.z * 100.0 + 100.0).to_int()
+  // Normalize & Scale
+  let (nx, ny, nz) = if len == 0.0 {
+      (x, y, z)
+  } else {
+      (x / len, y / len, z / len)
+  }
 
-  // 4. Write Output
+  let ox = (nx * 100.0 + 100.0).to_int()
+  let oy = (ny * 100.0 + 100.0).to_int()
+  let oz = (nz * 100.0 + 100.0).to_int()
+
   output_buffer[idx] = ox.to_byte()
-  output_buffer[(idx + 1) % buffer_size] = oy.to_byte()
-  output_buffer[(idx + 2) % buffer_size] = oz.to_byte()
+  output_buffer[(idx + 1).land(mask)] = oy.to_byte()
+  output_buffer[(idx + 2).land(mask)] = oz.to_byte()
 }
 
 pub fn process_tensor_stream() -> Int {
   let mut processed = 0
+  let mask = 65535
 
   // Kinetic Loop: Unrolled 4x (12 bytes)
   while diff(read_head, write_head, buffer_size) >= 12 {
     let idx = read_head
 
-    process_single_vector(idx)
-    process_single_vector((idx + 3) % buffer_size)
-    process_single_vector((idx + 6) % buffer_size)
-    process_single_vector((idx + 9) % buffer_size)
+    process_vector_inline(idx)
+    process_vector_inline((idx + 3).land(mask))
+    process_vector_inline((idx + 6).land(mask))
+    process_vector_inline((idx + 9).land(mask))
 
-    read_head = (read_head + 12) % buffer_size
+    read_head = (read_head + 12).land(mask)
     processed = processed + 12
   }
 
-  // Handle Residuals (1-3 vectors)
+  // Handle Residuals
   while diff(read_head, write_head, buffer_size) >= 3 {
-    process_single_vector(read_head)
-    read_head = (read_head + 3) % buffer_size
+    process_vector_inline(read_head)
+    read_head = (read_head + 3).land(mask)
     processed = processed + 3
   }
 

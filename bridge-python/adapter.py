@@ -86,18 +86,17 @@ console = Console()
 
 class SignalGate:
     """
-    The Virtual Nervous System: Signal Filtering
+    The Virtual Nervous System: Signal Filtering (V3.2 - Sovereign Grade)
     """
     def __init__(self):
-        self.entropy_level = 0.0
-        self.urgency_level = 0.0
-        self.threat_level = 0.0
+        self.entropy_level = 0.0 # CPU
+        self.urgency_level = 0.0 # RAM
+        self.threat_level = 0.0  # Pattern/Context Risk
 
     def analyze(self, context="kinetic_execution"):
-        # Real Proprioception
+        # Real Proprioception (Digital Sense)
         try:
             # Short interval for immediate feedback
-            # Using interval=None for non-blocking in loops
             cpu = psutil.cpu_percent(interval=None)
             mem = psutil.virtual_memory().percent
         except Exception:
@@ -106,7 +105,14 @@ class SignalGate:
 
         self.entropy_level = cpu / 100.0
         self.urgency_level = mem / 100.0
-        self.threat_level = 0.05 # Low threat in controlled env
+
+        # Threat Assessment (Contextual)
+        if context == "war_speed":
+            self.threat_level = 0.8 # High risk mode
+        elif context == "benchmark":
+            self.threat_level = 0.2
+        else:
+            self.threat_level = 0.05
 
         return {
             "ENTROPY": self.entropy_level,
@@ -114,15 +120,59 @@ class SignalGate:
             "THREAT": self.threat_level
         }
 
-    def check_veto(self, metrics):
+    def check_veto(self, metrics, strict=False):
         """
         The Sound Heart: Vetoes execution if the system is unstable.
         """
-        if metrics["ENTROPY"] > 0.90:
-            return True, f"[VETO] System Entropy Critical (CPU {metrics['ENTROPY']*100:.1f}% > 90%). Rest required."
+        # 1. ENTROPY GATE (CPU Stability)
+        if metrics["ENTROPY"] > 0.92:
+            return True, f"[VETO: ENTROPY] System Entropy Critical (CPU {metrics['ENTROPY']*100:.1f}%). Thermodynamic Limit Reached."
+
+        # 2. URGENCY GATE (Memory Pressure)
         if metrics["URGENCY"] > 0.95:
-             return True, f"[VETO] Memory Pressure Critical (RAM {metrics['URGENCY']*100:.1f}% > 95%). Aborting to prevent OOM."
-        return False, "System Stable."
+             return True, f"[VETO: URGENCY] Memory Pressure Critical (RAM {metrics['URGENCY']*100:.1f}%). OOM Risk Imminent."
+
+        # 3. THREAT GATE (Operational Risk)
+        if strict and metrics["THREAT"] > 0.7:
+             return True, f"[VETO: THREAT] Operational Risk too high for Strict Mode ({metrics['THREAT']*100:.1f}%)."
+
+        return False, "System Sound."
+
+class DigitalProprioception:
+    """
+    Self-Sensing and Integrity Verification Module
+    """
+    @staticmethod
+    def verify_integrity(kernel_path, console):
+        """
+        Verifies the SHA256 integrity of the kernel.
+        """
+        try:
+            console.print(f"[cyan]Digital Proprioception: Scanning {os.path.basename(kernel_path)}...[/cyan]")
+            sha256_hash = hashlib.sha256()
+            with open(kernel_path, "rb") as f:
+                for byte_block in iter(lambda: f.read(4096), b""):
+                    sha256_hash.update(byte_block)
+            digest = sha256_hash.hexdigest()
+            console.print(f"[dim]Kernel Hash (SHA256): {digest}[/dim]")
+            return True, digest
+        except Exception as e:
+            return False, str(e)
+
+    @staticmethod
+    def audit_execution(start_time, end_time, vector_count):
+        """
+        Post-Action Audit (Did we meet the deadline?)
+        """
+        duration = end_time - start_time
+        throughput = vector_count / duration if duration > 0 else 0
+        confidence = 1.0
+
+        if throughput < 1000:
+            confidence = 0.5
+            return False, f"Sub-optimal Velocity ({throughput:.2f} vec/s)", confidence
+
+        return True, f"Kinetic Target Met ({throughput:.2f} vec/s)", confidence
 
 class MoonlightAdapter:
     def __init__(self):
@@ -175,52 +225,49 @@ class MoonlightAdapter:
         """
         The Digital Proprioception: Verifies the integrity of the Wasm kernel.
         """
-        try:
-            console.print(f"[cyan]Verifying Kernel Integrity: {os.path.basename(kernel_path)}...[/cyan]")
-            sha256_hash = hashlib.sha256()
-            with open(kernel_path, "rb") as f:
-                # Read and update hash string value in blocks of 4K
-                for byte_block in iter(lambda: f.read(4096), b""):
-                    sha256_hash.update(byte_block)
+        return DigitalProprioception.verify_integrity(kernel_path, console)
 
-            digest = sha256_hash.hexdigest()
-            console.print(f"[dim]Kernel Hash (SHA256): {digest}[/dim]")
-
-            return True, digest
-        except Exception as e:
-            return False, str(e)
-
-    def ignite(self, bench_mode=False, kernel_override=None, strict=False):
+    def ignite(self, bench_mode=False, kernel_override=None, strict=False, war_speed=False):
         if not self.cargo_path:
             console.print("[bold red]Error:[/bold red] Cargo not found.")
             return
 
-        # 1. Signal Gate Analysis (Initial)
-        with Progress(
-            SpinnerColumn(),
-            TextColumn("[progress.description]{task.description}"),
-            BarColumn(),
-            TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
-        ) as progress:
-            task1 = progress.add_task("[cyan]Calibrating Signal Gates...", total=100)
-            metrics = self.gate.analyze("kinetic_execution" if not bench_mode else "benchmark")
-            progress.finished = True
-            time.sleep(0.02)
+        # Context Definition
+        context = "war_speed" if war_speed else ("benchmark" if bench_mode else "kinetic_execution")
 
-        # Display Gate Status
+        # 1. Signal Gate Analysis (Initial)
+        # In War Speed, we minimize delay
+        if not war_speed:
+            with Progress(
+                SpinnerColumn(),
+                TextColumn("[progress.description]{task.description}"),
+                BarColumn(),
+                TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
+            ) as progress:
+                task1 = progress.add_task("[cyan]Calibrating Signal Gates...[/cyan]", total=100)
+                time.sleep(0.5) # Simulate calibration
+                metrics = self.gate.analyze(context)
+                progress.update(task1, advance=100)
+        else:
+            metrics = self.gate.analyze(context)
+
+        # Display Gate Status (Sovereign UI)
         gate_table = Table(box=box.SIMPLE, show_header=False)
-        gate_table.add_row("[bold]ENTROPY (CPU)[/bold]", f"{metrics['ENTROPY']*100:.1f}%", "[green]STABLE[/green]" if metrics['ENTROPY'] < 0.5 else "[yellow]HIGH[/yellow]")
-        gate_table.add_row("[bold]URGENCY (RAM)[/bold]", f"{metrics['URGENCY']*100:.1f}%", "[red]WAR SPEED[/red]" if metrics['URGENCY'] > 0.8 else "[blue]CRUISE[/blue]")
-        gate_table.add_row("[bold]THREAT (VETO)[/bold]", f"{metrics['THREAT']*100:.1f}%", "[green]SECURE[/green]")
-        console.print(Panel(gate_table, title="Virtual Nervous System", style="bold magenta"))
+        gate_table.add_row("[bold]ENTROPY (CPU)[/bold]", f"{metrics['ENTROPY']*100:.1f}%", "[green]SOUND[/green]" if metrics['ENTROPY'] < 0.8 else "[red]UNSTABLE[/red]")
+        gate_table.add_row("[bold]URGENCY (RAM)[/bold]", f"{metrics['URGENCY']*100:.1f}%", "[red]CRITICAL[/red]" if metrics['URGENCY'] > 0.9 else "[green]OPTIMAL[/green]")
+        gate_table.add_row("[bold]THREAT (CTX)[/bold]", f"{metrics['THREAT']*100:.0f}%", "[yellow]ELEVATED[/yellow]" if war_speed else "[green]LOW[/green]")
+
+        mode_str = "[red bold]WAR SPEED[/red bold]" if war_speed else "[blue]STANDARD[/blue]"
+        console.print(Panel(gate_table, title=f"Virtual Nervous System | MODE: {mode_str}", style="bold magenta"))
 
         # 2. The Veto Check (Initial)
-        veto, reason = self.gate.check_veto(metrics)
-        if veto and strict:
-            console.print(f"[bold red]⛔ INTERVENTION (STRICT):[/bold red] {reason}")
-            raise SystemError(f"KERNEL PANIC: {reason}")
-        elif veto:
-            console.print(f"[bold yellow]⚠ WARNING:[/bold yellow] {reason} (Proceeding in non-strict mode)")
+        veto, reason = self.gate.check_veto(metrics, strict=strict)
+        if veto:
+            console.print(f"[bold red]⛔ INTERVENTION (VETO):[/bold red] {reason}")
+            if strict or metrics['ENTROPY'] > 0.98: # Hard stop at 98% even in non-strict
+                 raise SystemError(f"KERNEL PANIC: {reason}")
+            else:
+                 console.print(f"[bold yellow]⚠ OVERRIDE:[/bold yellow] Proceeding under operator authority.")
 
         cmd = ["cargo", "run", "--quiet", "--manifest-path", "Cargo.toml", "--"]
 
@@ -244,16 +291,21 @@ class MoonlightAdapter:
             final_kernel = self.mock_wasm
             kernel_name = "Mock Kernel (Wasm)"
         else:
-            console.print("[yellow]Notice:[/yellow] No Wasm artifacts found. Falling back to Native Mode.")
+            if not war_speed:
+                console.print("[yellow]Notice:[/yellow] No Wasm artifacts found. Falling back to Native Mode.")
             # final_kernel remains None
 
         # 3. Integrity Verification (Only if Wasm)
         if final_kernel:
-            success, digest = self.verify_integrity(final_kernel)
-            if not success:
-                 console.print(f"[bold red]SECURITY ALERT:[/bold red] Kernel verification failed: {digest}")
-                 if strict:
-                     raise SystemError("KERNEL PANIC: Integrity Check Failed")
+            # In War Speed, we trust the artifact if not strict
+            if not war_speed or strict:
+                success, digest = self.verify_integrity(final_kernel)
+                if not success:
+                     console.print(f"[bold red]SECURITY ALERT:[/bold red] Kernel verification failed: {digest}")
+                     if strict:
+                         raise SystemError("KERNEL PANIC: Integrity Check Failed")
+            else:
+                console.print(f"[dim]Skipping Integrity Check (War Speed)[/dim]")
 
             cmd.extend(["--kernel", os.path.abspath(final_kernel)])
 
@@ -425,6 +477,7 @@ def main():
         ignite_parser.add_argument("--bench", action="store_true", help="Run in benchmark mode")
         ignite_parser.add_argument("--kernel", help="Override kernel path")
         ignite_parser.add_argument("--strict", action="store_true", help="Enforce Signal Gate Veto")
+        ignite_parser.add_argument("--war-speed", action="store_true", help="Minimize latency, skip non-critical checks")
 
         args = parser.parse_args()
 
@@ -433,7 +486,7 @@ def main():
             adapter.scan_environment()
         elif args.command == "ignite":
             adapter.print_header()
-            adapter.ignite(bench_mode=args.bench, kernel_override=args.kernel, strict=args.strict)
+            adapter.ignite(bench_mode=args.bench, kernel_override=args.kernel, strict=args.strict, war_speed=args.war_speed)
         else:
             adapter.interactive_menu()
     except KeyboardInterrupt:

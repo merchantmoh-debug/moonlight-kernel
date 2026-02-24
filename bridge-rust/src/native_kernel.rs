@@ -66,50 +66,66 @@ impl NativeKernel {
         }
     }
 
-    fn process_single_vector(&mut self, idx: usize) {
-        let x = self.buffer[idx] as f64;
-        let y = self.buffer[(idx + 1) & (BUFFER_SIZE - 1)] as f64;
-        let z = self.buffer[(idx + 2) & (BUFFER_SIZE - 1)] as f64;
+    // Inlined helper for single vector processing (Manual optimization)
+    #[inline(always)]
+    fn process_vector_at(&mut self, idx: usize) {
+        // Unsafe block for raw speed? No, let's stay safe but fast with masks.
+        // The mask (BUFFER_SIZE - 1) is 0xFFFF.
 
-        // Normalize Logic
-        let len = (x * x + y * y + z * z).sqrt();
-        let (nx, ny, nz) = if len == 0.0 {
-            (x, y, z)
-        } else {
+        // Read (Kinetic Input)
+        let x = self.buffer[idx] as f64;
+        let y = self.buffer[(idx + 1) & 0xFFFF] as f64;
+        let z = self.buffer[(idx + 2) & 0xFFFF] as f64;
+
+        // Compute (Neuronal Activation)
+        // Optimization: Fast inverse square root could be used here, but let's stick to standard sqrt for precision.
+        let len_sq = x * x + y * y + z * z;
+        let (nx, ny, nz) = if len_sq > 0.0 {
+            let len = len_sq.sqrt();
             (x / len, y / len, z / len)
+        } else {
+            (x, y, z)
         };
 
-        // Scale to visualize direction: (nx * 100 + 100)
+        // Write (Kinetic Output)
+        // Avoiding bounds checks on write using the same mask logic if we were iterating randomly,
+        // but here idx is from read_head so it wraps naturally.
+        // We write to output_buffer at the same index.
+
         self.output_buffer[idx] = (nx * 100.0 + 100.0) as u8;
-        self.output_buffer[(idx + 1) & (BUFFER_SIZE - 1)] = (ny * 100.0 + 100.0) as u8;
-        self.output_buffer[(idx + 2) & (BUFFER_SIZE - 1)] = (nz * 100.0 + 100.0) as u8;
+        self.output_buffer[(idx + 1) & 0xFFFF] = (ny * 100.0 + 100.0) as u8;
+        self.output_buffer[(idx + 2) & 0xFFFF] = (nz * 100.0 + 100.0) as u8;
     }
 
     pub fn process_tensor_stream(&mut self) -> i32 {
         let mut processed = 0;
 
-        // Verify Canary
+        // Verify Canary (Critical Security)
         if self.canary != 0xAA {
             panic!("KERNEL PANIC: Canary corrupted! Memory violation detected.");
         }
 
-        // Process in chunks of 4 (12 bytes)
+        // Kinetic Loop: Unrolled 4x (12 bytes)
+        // We use a local copy of read_head to avoid &mut self conflicts if we split methods,
+        // but since we inlined, we can use self directly.
+
         while self.diff() >= 12 {
             let idx = self.read_head;
 
-            self.process_single_vector(idx);
-            self.process_single_vector((idx + 3) & (BUFFER_SIZE - 1));
-            self.process_single_vector((idx + 6) & (BUFFER_SIZE - 1));
-            self.process_single_vector((idx + 9) & (BUFFER_SIZE - 1));
+            // Unrolled execution
+            self.process_vector_at(idx);
+            self.process_vector_at((idx + 3) & 0xFFFF);
+            self.process_vector_at((idx + 6) & 0xFFFF);
+            self.process_vector_at((idx + 9) & 0xFFFF);
 
-            self.read_head = (self.read_head + 12) & (BUFFER_SIZE - 1);
+            self.read_head = (self.read_head + 12) & 0xFFFF;
             processed += 12;
         }
 
-        // Handle remaining
+        // Handle Residuals (1-3 vectors)
         while self.diff() >= 3 {
-            self.process_single_vector(self.read_head);
-            self.read_head = (self.read_head + 3) & (BUFFER_SIZE - 1);
+            self.process_vector_at(self.read_head);
+            self.read_head = (self.read_head + 3) & 0xFFFF;
             processed += 3;
         }
 
@@ -119,54 +135,68 @@ impl NativeKernel {
     pub fn vector_add_batch(&mut self, count: i32) -> i32 {
         let n = count as usize;
         let mut processed = 0;
-        let mut current_head = self.read_head;
+        let mut idx = self.read_head;
+
+        // Simple loop optimization: iterators are often faster but indices with masks are predictable.
+        // We will process one vector (3 bytes) at a time.
 
         for _ in 0..n {
-            let idx = current_head;
-            let idx_y = (idx + 1) & (BUFFER_SIZE - 1);
-            let idx_z = (idx + 2) & (BUFFER_SIZE - 1);
+             // Inline the addition
+            let idx_y = (idx + 1) & 0xFFFF;
+            let idx_z = (idx + 2) & 0xFFFF;
 
-            let val_in_x = self.buffer[idx] as u16;
-            let val_out_x = self.output_buffer[idx] as u16;
-            self.output_buffer[idx] = ((val_in_x + val_out_x).min(255)) as u8;
+            // SIMD-like logic (saturating add)
+            self.output_buffer[idx] = self.output_buffer[idx].saturating_add(self.buffer[idx]);
+            self.output_buffer[idx_y] = self.output_buffer[idx_y].saturating_add(self.buffer[idx_y]);
+            self.output_buffer[idx_z] = self.output_buffer[idx_z].saturating_add(self.buffer[idx_z]);
 
-            let val_in_y = self.buffer[idx_y] as u16;
-            let val_out_y = self.output_buffer[idx_y] as u16;
-            self.output_buffer[idx_y] = ((val_in_y + val_out_y).min(255)) as u8;
-
-            let val_in_z = self.buffer[idx_z] as u16;
-            let val_out_z = self.output_buffer[idx_z] as u16;
-            self.output_buffer[idx_z] = ((val_in_z + val_out_z).min(255)) as u8;
-
-            current_head = (current_head + 3) & (BUFFER_SIZE - 1);
+            idx = (idx + 3) & 0xFFFF;
             processed += 1;
         }
+
+        // Note: vector_add_batch in previous version updated read_head?
+        // No, in the synthesis script it says "current_head = ...", it doesn't update the global read_head?
+        // Wait, the synthesis script says: `current_head = (current_head + 3) % buffer_size` inside the loop,
+        // but `read_head` variable is NOT updated at the end of the function in the script.
+        // The previous Rust implementation used `current_head` local variable.
+        // So this function acts as a "peek and modify" without consuming the stream?
+        // Actually, looking at main.rs usage: `self.backend.vector_add_batch(processed_vecs)?;`
+        // It's called after `process_tensor_stream`.
+        // `process_tensor_stream` advances `read_head`.
+        // So if `vector_add_batch` uses `read_head`, it's operating on *new* data?
+        // Or is it supposed to operate on the data just processed?
+        // In the synthesis script: `let mut current_head = read_head` -> It starts at the *current* read_head.
+        // But `process_tensor_stream` has just advanced `read_head`.
+        // So `vector_add_batch` operates on the *next* batch of data?
+        // That seems to be the logic.
+
         processed as i32
     }
 
     pub fn vector_dot_batch(&self, count: i32) -> i32 {
         let n = count as usize;
         let mut dot_sum: i32 = 0;
-        let mut current_head = self.read_head;
+        let mut idx = self.read_head;
 
         for _ in 0..n {
-            let idx = current_head;
-            let idx_y = (idx + 1) & (BUFFER_SIZE - 1);
-            let idx_z = (idx + 2) & (BUFFER_SIZE - 1);
+            let idx_y = (idx + 1) & 0xFFFF;
+            let idx_z = (idx + 2) & 0xFFFF;
 
             let in_x = self.buffer[idx] as i32;
             let out_x = self.output_buffer[idx] as i32;
-            dot_sum = dot_sum.wrapping_add(in_x * out_x);
+            let term_x = in_x * out_x;
 
             let in_y = self.buffer[idx_y] as i32;
             let out_y = self.output_buffer[idx_y] as i32;
-            dot_sum = dot_sum.wrapping_add(in_y * out_y);
+            let term_y = in_y * out_y;
 
             let in_z = self.buffer[idx_z] as i32;
             let out_z = self.output_buffer[idx_z] as i32;
-            dot_sum = dot_sum.wrapping_add(in_z * out_z);
+            let term_z = in_z * out_z;
 
-            current_head = (current_head + 3) & (BUFFER_SIZE - 1);
+            dot_sum = dot_sum.wrapping_add(term_x).wrapping_add(term_y).wrapping_add(term_z);
+
+            idx = (idx + 3) & 0xFFFF;
         }
         dot_sum
     }
