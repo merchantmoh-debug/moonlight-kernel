@@ -266,7 +266,8 @@ impl MoonlightBridge {
                 Box::new(WasmBackend::new(path, strict_mode)?)
             }
             _ => {
-                info!("Wasm Artifact Missing or Not Specified. Engaging Native Kernel (Iron Lung Mode).");
+                info!("Wasm Artifact Missing or Not Specified. Engaging Native Kernel (Iron Lung V2 - Optimized).");
+                println!("KINETIC OPTIMIZATIONS: Active (f32 + Tail Canary + MASK)");
                 Box::new(NativeBackend::new())
             }
         };

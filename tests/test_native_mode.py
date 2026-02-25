@@ -80,5 +80,37 @@ class TestNativeMode(unittest.TestCase):
             self.assertEqual(cmd[0], "cargo")
             self.assertEqual(cmd[1], "run")
 
+    def test_kernel_panic_handling(self):
+        # Simulate a Rust panic (e.g. Canary corruption)
+        with patch.object(adapter, 'psutil') as mock_psutil, \
+             patch.object(adapter.shutil, 'which', return_value="/usr/bin/cargo"), \
+             patch.object(adapter.os.path, 'exists', return_value=False), \
+             patch.object(adapter.subprocess, 'Popen') as mock_popen, \
+             patch.object(adapter.threading, 'Thread'):
+
+            # Setup Psutil to return safe values
+            mock_psutil.cpu_percent.return_value = 10.0
+            mock_mem = MagicMock()
+            mock_mem.percent = 10.0
+            mock_psutil.virtual_memory.return_value = mock_mem
+
+             # Setup Mock Process to fail
+            mock_process = MagicMock()
+            mock_process.stdout.__iter__.return_value = iter(["KERNEL PANIC: Canary corrupted!"])
+            mock_process.poll.return_value = 101 # Rust panic code
+            mock_process.returncode = 101
+            mock_popen.return_value = mock_process
+
+            moon_adapter = MoonlightAdapter()
+
+            # Should print error message but not raise exception unless strict mode
+            with patch.object(adapter.console, 'print') as mock_print:
+                 moon_adapter.ignite(bench_mode=False, strict=False)
+                 # Verify we caught the crash log
+                 # Adapter prints "Bridge Crash with code 101"
+                 args_list = mock_print.call_args_list
+                 found_crash = any("Bridge Crash with code 101" in str(call) for call in args_list)
+                 self.assertTrue(found_crash, "Adapter failed to report bridge crash")
+
 if __name__ == "__main__":
     unittest.main()
