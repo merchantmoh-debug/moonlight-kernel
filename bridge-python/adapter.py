@@ -45,6 +45,7 @@ except ImportError:
         def __init__(self, **kwargs): self.parts = {}
         def split(self, *args, **kwargs): pass
         def split_column(self, *args, **kwargs): pass
+        def split_row(self, *args, **kwargs): pass
         def __setitem__(self, key, value): self.parts[key] = value
         def __getitem__(self, key): return self.parts.get(key, self)
         def update(self, *args): pass
@@ -52,6 +53,7 @@ except ImportError:
         def __init__(self, *args, **kwargs): pass
         def __enter__(self): return self
         def __exit__(self, *args): pass
+        def update(self, *args, **kwargs): pass
     class Table:
         def __init__(self, **kwargs): self.rows = []
         def add_column(self, *args, **kwargs): pass
@@ -80,6 +82,11 @@ except ImportError:
     class Align:
         @staticmethod
         def center(x): return x
+
+try:
+    from dashboard import Dashboard
+except ImportError:
+    Dashboard = None
 
 # Initialize Console
 console = Console()
@@ -236,7 +243,6 @@ class MoonlightAdapter:
         context = "war_speed" if war_speed else ("benchmark" if bench_mode else "kinetic_execution")
 
         # 1. Signal Gate Analysis (Initial)
-        # In War Speed, we minimize delay
         if not war_speed:
             with Progress(
                 SpinnerColumn(),
@@ -250,15 +256,6 @@ class MoonlightAdapter:
                 progress.update(task1, advance=100)
         else:
             metrics = self.gate.analyze(context)
-
-        # Display Gate Status (Sovereign UI)
-        gate_table = Table(box=box.SIMPLE, show_header=False)
-        gate_table.add_row("[bold]ENTROPY (CPU)[/bold]", f"{metrics['ENTROPY']*100:.1f}%", "[green]SOUND[/green]" if metrics['ENTROPY'] < 0.8 else "[red]UNSTABLE[/red]")
-        gate_table.add_row("[bold]URGENCY (RAM)[/bold]", f"{metrics['URGENCY']*100:.1f}%", "[red]CRITICAL[/red]" if metrics['URGENCY'] > 0.9 else "[green]OPTIMAL[/green]")
-        gate_table.add_row("[bold]THREAT (CTX)[/bold]", f"{metrics['THREAT']*100:.0f}%", "[yellow]ELEVATED[/yellow]" if war_speed else "[green]LOW[/green]")
-
-        mode_str = "[red bold]WAR SPEED[/red bold]" if war_speed else "[blue]STANDARD[/blue]"
-        console.print(Panel(gate_table, title=f"Virtual Nervous System | MODE: {mode_str}", style="bold magenta"))
 
         # 2. The Veto Check (Initial)
         veto, reason = self.gate.check_veto(metrics, strict=strict)
@@ -297,7 +294,6 @@ class MoonlightAdapter:
 
         # 3. Integrity Verification (Only if Wasm)
         if final_kernel:
-            # In War Speed, we trust the artifact if not strict
             if not war_speed or strict:
                 success, digest = self.verify_integrity(final_kernel)
                 if not success:
@@ -327,6 +323,12 @@ class MoonlightAdapter:
                 shell=False
             )
 
+            # Initialize Dashboard
+            dashboard = None
+            if Dashboard and sys.stdout.isatty():
+                dashboard = Dashboard(self.gate)
+                dashboard.mode = "Benchmark" if bench_mode else ("War Speed" if war_speed else "Standard")
+
             # Non-Blocking Reader
             log_queue = queue.Queue()
             def reader_thread():
@@ -337,93 +339,32 @@ class MoonlightAdapter:
             t = threading.Thread(target=reader_thread, daemon=True)
             t.start()
 
-            # Dashboard State
-            logs = []
-            start_time = time.time()
-            last_bench_str = ""
-
-            # Layout
-            layout = Layout()
-            layout.split_column(
-                Layout(name="header", size=3),
-                Layout(name="body", ratio=1),
-                Layout(name="footer", size=3)
-            )
-
-            layout["header"].update(Panel(f"Moonlight Bridge (Kernel: {kernel_name})", style="bold cyan"))
-
             # TUI Loop
-            if sys.stdout.isatty():
-                with Live(layout, console=console, refresh_per_second=10) as live:
+            if dashboard:
+                with Live(dashboard.get_renderable(), console=console, refresh_per_second=10) as live:
                     while True:
-                        # Process Queue
                         while not log_queue.empty():
                             try:
-                                line = log_queue.get_nowait()
-                                line = line.strip()
-                                if "Neuronal Validation: ACTIVE" in line:
-                                    logs.append("[bold green]✔ NEURONAL VALIDATION: ACTIVE[/bold green]")
-                                elif "BENCHMARK_DATA:" in line:
-                                    try:
-                                        # Parse: BENCHMARK_DATA: vectors_sec=123.45, mb_sec=12.34
-                                        parts = line.split(":")[1].strip().split(",")
-                                        vecs = parts[0].split("=")[1]
-                                        mbs = parts[1].split("=")[1]
-                                        last_bench_str = f" | Speed: {vecs} v/s"
-                                        logs.append(f"[bold green]🚀 TELEMETRY: {vecs} vec/s ({mbs} MB/s)[/bold green]")
-                                    except Exception:
-                                        logs.append(f"[bold yellow]⚠ PARSE ERROR: {line}[/bold yellow]")
-                                elif "BENCHMARK" in line:
-                                    logs.append(f"[bold cyan]{line}[/bold cyan]")
-                                elif "Validation FAILED" in line:
-                                    logs.append(f"[bold red]{line}[/bold red]")
-                                elif "ERROR" in line:
-                                    logs.append(f"[bold red]{line}[/bold red]")
-                                elif "KINETIC OPTIMIZATIONS" in line or ">" in line:
-                                     logs.append(f"[bold green]{line}[/bold green]")
-                                elif line:
-                                    clean_line = line.replace("INFO", "[blue]INFO[/blue]").replace("WARN", "[yellow]WARN[/yellow]")
-                                    logs.append(clean_line)
-
-                                if len(logs) > 15:
-                                    logs.pop(0)
+                                line = log_queue.get_nowait().strip()
+                                dashboard.update_logs(line)
                             except queue.Empty:
                                 break
 
-                        # Live Telemetry Update
+                        # Check Veto Runtime
                         metrics = self.gate.analyze()
                         veto, reason = self.gate.check_veto(metrics)
-
                         if veto and strict:
                              process.terminate()
                              raise SystemError(f"KERNEL PANIC (Runtime): {reason}")
 
-                        # Update UI
-                        log_content = "\n".join(logs)
-                        layout["body"].update(Panel(log_content, title="Kernel Log Stream", border_style="blue"))
+                        live.update(dashboard.get_renderable())
 
-                        cpu = metrics["ENTROPY"] * 100
-                        ram = metrics["URGENCY"] * 100
-                        threat = metrics["THREAT"] * 100
-
-                        elapsed = int(time.time() - start_time)
-                        pulse = "⚡" if int(time.time() * 2) % 2 == 0 else " "
-
-                        stats = f"{pulse} CPU: {cpu:.1f}% | RAM: {ram:.1f}% | Threat: {threat:.1f}% | T+{elapsed}s | Mode: {'BENCH' if bench_mode else 'KINETIC'}{last_bench_str}"
-
-                        style = "green"
-                        if veto: style = "red"
-                        elif cpu > 80: style = "yellow"
-
-                        layout["footer"].update(Panel(stats, title="System Telemetry (Signal Gate)", border_style=style))
-
-                        # Check Exit
                         if process.poll() is not None and log_queue.empty():
                             break
 
                         time.sleep(0.05)
             else:
-                 # HEADLESS MODE (For Tests)
+                 # HEADLESS MODE
                  while True:
                      try:
                          line = log_queue.get(timeout=0.1)
@@ -440,7 +381,7 @@ class MoonlightAdapter:
         except Exception as e:
             console.print(f"[bold red]Execution Error:[/bold red] {e}")
             if strict:
-                raise # Re-raise for upper level handling
+                raise
 
     def interactive_menu(self):
         self.print_header()
