@@ -99,6 +99,7 @@ class SignalGate:
         self.entropy_level = 0.0 # CPU
         self.urgency_level = 0.0 # RAM
         self.threat_level = 0.0  # Pattern/Context Risk
+        self.last_entropy = 0.0  # For derivative check
 
     def analyze(self, context="kinetic_execution"):
         # Real Proprioception (Digital Sense)
@@ -110,8 +111,13 @@ class SignalGate:
             cpu = 50.0 # Fallback
             mem = 50.0
 
-        self.entropy_level = cpu / 100.0
+        # Derivative Check (Entropy Spike Detection)
+        new_entropy = cpu / 100.0
+        delta = new_entropy - self.last_entropy
+
+        self.entropy_level = new_entropy
         self.urgency_level = mem / 100.0
+        self.last_entropy = new_entropy
 
         # Threat Assessment (Contextual)
         if context == "war_speed":
@@ -120,6 +126,10 @@ class SignalGate:
             self.threat_level = 0.2
         else:
             self.threat_level = 0.05
+
+        # Threat Escalation on rapid entropy spike (>50% jump)
+        if delta > 0.5:
+            self.threat_level = max(self.threat_level, 0.8)
 
         return {
             "ENTROPY": self.entropy_level,
@@ -234,6 +244,20 @@ class MoonlightAdapter:
         """
         return DigitalProprioception.verify_integrity(kernel_path, console)
 
+    def validate_kernel_path(self, path):
+        """
+        The Sound Heart: Validates that the path is within the project root and safe.
+        """
+        abs_path = os.path.abspath(path)
+        if not abs_path.startswith(self.root_dir):
+            return False, "Path traversal attempt detected. Access denied."
+        if ".." in path:
+             # Double check relative path usage
+             normalized = os.path.normpath(path)
+             if not os.path.abspath(normalized).startswith(self.root_dir):
+                 return False, "Path traversal attempt detected."
+        return True, "Path Safe."
+
     def ignite(self, bench_mode=False, kernel_override=None, strict=False, war_speed=False):
         if not self.cargo_path:
             console.print("[bold red]Error:[/bold red] Cargo not found.")
@@ -257,6 +281,9 @@ class MoonlightAdapter:
         else:
             metrics = self.gate.analyze(context)
 
+        # Display Signal Vector (The Adaptor Layer)
+        console.print(f"[bold white]SIGNAL VECTOR:[/bold white] [cyan]ENTROPY: {metrics['ENTROPY']:.2f}[/cyan] | [magenta]URGENCY: {metrics['URGENCY']:.2f}[/magenta] | [red]THREAT: {metrics['THREAT']:.2f}[/red]")
+
         # 2. The Veto Check (Initial)
         veto, reason = self.gate.check_veto(metrics, strict=strict)
         if veto:
@@ -279,6 +306,10 @@ class MoonlightAdapter:
         kernel_name = "Native Kernel (Iron Lung)"
 
         if kernel_override:
+            safe, msg = self.validate_kernel_path(kernel_override)
+            if not safe:
+                console.print(f"[bold red]SECURITY VETO:[/bold red] {msg}")
+                return
             final_kernel = kernel_override
             kernel_name = os.path.basename(final_kernel)
         elif os.path.exists(self.moonbit_wasm):

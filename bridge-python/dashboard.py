@@ -108,9 +108,24 @@ class Dashboard:
         if cpu_val > 90 or mem_val > 90: gate_status = "[red]CRITICAL[/red]"
         elif cpu_val > 80: gate_status = "[yellow]STRESSED[/yellow]"
 
-        signal_text = f"\n[bold]System State:[/bold]\n{gate_status}\n\n[dim]Veto Power Active[/dim]"
+        # Kinetic Graph (ASCII Bar Chart)
+        with self.lock:
+             recent_hist = self.throughput_history[-20:] # Last 20 points
+
+        max_h = max(recent_hist) if recent_hist and max(recent_hist) > 0 else 1.0
+        bars = ""
+        for val in recent_hist:
+             height = int((val / max_h) * 8)
+             bars += "  ▂▃▄▅▆▇█"[height] if height < 8 else "█"
+
+        signal_panel = Group(
+            Align.center(f"[bold]System State:[/bold]\n{gate_status}"),
+            Align.center(f"\n[dim]Kinetic Graph (Last 2s)[/dim]\n[cyan]{bars}[/cyan]"),
+            Align.center(f"\n[dim]Veto Power Active[/dim]")
+        )
+
         self.layout["signals"].update(Panel(
-            Align.center(signal_text, vertical="middle"),
+            signal_panel,
             title="[bold]Nervous System[/bold]",
             border_style="magenta"
         ))
