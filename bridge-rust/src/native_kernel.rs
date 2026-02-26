@@ -96,6 +96,37 @@ impl NativeKernel {
         self.output_buffer[(idx + 2) & MASK] = (nz * 100.0 + 100.0) as u8;
     }
 
+    #[inline(always)]
+    fn process_contiguous_chunk(in_slice: &[u8], out_slice: &mut [u8]) {
+        // Process 12 bytes (4 vectors) at a time using chunks_exact
+        // This is safe and vectorized by the compiler
+        let mut chunks_in = in_slice.chunks_exact(12);
+        let mut chunks_out = out_slice.chunks_exact_mut(12);
+
+        for (inc, outc) in chunks_in.by_ref().zip(chunks_out.by_ref()) {
+            for i in 0..4 {
+                let off = i * 3;
+                let x = inc[off] as f32;
+                let y = inc[off+1] as f32;
+                let z = inc[off+2] as f32;
+
+                let len_sq = x*x + y*y + z*z;
+                let (nx, ny, nz) = if len_sq > 0.0 {
+                    let len = len_sq.sqrt();
+                    (x/len, y/len, z/len)
+                } else {
+                    (x, y, z)
+                };
+
+                outc[off] = (nx * 100.0 + 100.0) as u8;
+                outc[off+1] = (ny * 100.0 + 100.0) as u8;
+                outc[off+2] = (nz * 100.0 + 100.0) as u8;
+            }
+        }
+
+        // Residuals are handled by the caller or ignored for next pass
+    }
+
     pub fn process_tensor_stream(&mut self) -> i32 {
         let mut processed = 0;
 
@@ -104,28 +135,62 @@ impl NativeKernel {
             panic!("KERNEL PANIC: Canary corrupted! Memory violation detected.");
         }
 
-        // Kinetic Loop: Unrolled 4x (12 bytes)
-        while self.diff() >= 12 {
-            let idx = self.read_head;
+        let available = self.diff();
+        if available < 3 { return 0; }
 
-            // Unrolled execution
-            self.process_vector_at(idx);
-            self.process_vector_at((idx + 3) & MASK);
-            self.process_vector_at((idx + 6) & MASK);
-            self.process_vector_at((idx + 9) & MASK);
+        let mut remaining = available;
 
-            self.read_head = (self.read_head + 12) & MASK;
-            processed += 12;
+        // 1. Process Contiguous Blocks Efficiently
+        while remaining >= 12 {
+            let contiguous_len = BUFFER_SIZE - self.read_head;
+
+            if contiguous_len >= 12 {
+                // We have at least one full chunk contiguous
+                let processable = std::cmp::min(remaining, contiguous_len);
+                // Round down to multiple of 12
+                let chunk_len = (processable / 12) * 12;
+
+                if chunk_len > 0 {
+                    let in_slice = &self.buffer[self.read_head .. self.read_head + chunk_len];
+                    let out_slice = &mut self.output_buffer[self.read_head .. self.read_head + chunk_len];
+
+                    Self::process_contiguous_chunk(in_slice, out_slice);
+
+                    self.read_head = (self.read_head + chunk_len) & MASK;
+                    processed += chunk_len;
+                    remaining -= chunk_len;
+                    continue;
+                }
+            }
+
+            // Fallback for Split/Wrap case (rare: < 12 bytes at end of buffer)
+            // Or if we just processed everything contiguous and loop condition 'remaining >= 12' is still true
+            // (meaning the rest is wrapped at the beginning).
+            // In that case, 'contiguous_len' will be small, but next iteration 'read_head' will be 0.
+
+            // If we are here, it means we have data, but it's split or small.
+            // If split (contiguous < 12), process one by one to cross the boundary.
+            if contiguous_len < 12 {
+                self.process_vector_at(self.read_head);
+                self.process_vector_at((self.read_head + 3) & MASK);
+                self.process_vector_at((self.read_head + 6) & MASK);
+                self.process_vector_at((self.read_head + 9) & MASK);
+
+                self.read_head = (self.read_head + 12) & MASK;
+                processed += 12;
+                remaining -= 12;
+            }
         }
 
         // Handle Residuals (1-3 vectors)
-        while self.diff() >= 3 {
+        while remaining >= 3 {
             self.process_vector_at(self.read_head);
             self.read_head = (self.read_head + 3) & MASK;
             processed += 3;
+            remaining -= 3;
         }
 
-        processed
+        processed as i32
     }
 
     pub fn vector_add_batch(&mut self, count: i32) -> i32 {

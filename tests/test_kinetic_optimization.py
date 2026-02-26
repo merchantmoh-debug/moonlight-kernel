@@ -30,7 +30,8 @@ class TestKineticOptimization(unittest.TestCase):
 
         process_mock = MagicMock()
         process_mock.poll.return_value = 0
-        process_mock.stdout = []
+        process_mock.stdout = MagicMock()
+        process_mock.stdout.__iter__.return_value = iter([])
         process_mock.returncode = 0
         mock_popen.return_value = process_mock
 
