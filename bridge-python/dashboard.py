@@ -35,7 +35,7 @@ class Dashboard:
         self.vectors_sec = 0.0
         self.mb_sec = 0.0
         self.logs = []
-        self.throughput_history = [0.0] * 60
+        self.throughput_history = [0.0] * 120 # Increased history
         self.lock = threading.Lock()
         self.start_time = time.time()
         self.mode = "Standard"
@@ -51,7 +51,7 @@ class Dashboard:
                     self.vectors_sec = vecs
                     self.mb_sec = mbs
                     self.throughput_history.append(vecs)
-                    if len(self.throughput_history) > 60:
+                    if len(self.throughput_history) > 120:
                         self.throughput_history.pop(0)
                 except:
                     pass
@@ -79,21 +79,23 @@ class Dashboard:
         # 1. Header
         elapsed = int(time.time() - self.start_time)
         pulse = "⚡" if int(time.time() * 2) % 2 == 0 else " "
-        header_text = f"[bold white]MOONLIGHT KERNEL v2.3[/] | [cyan]{self.mode}[/] | T+{elapsed}s {pulse}"
+        header_text = f"[bold white]MOONLIGHT KERNEL v3.0[/] | [cyan]{self.mode}[/] | T+{elapsed}s {pulse}"
         self.layout["header"].update(Panel(Align.center(header_text), style="on blue"))
 
         # 2. Cortex Status (Host)
-        metrics = {"ENTROPY": 0.0, "URGENCY": 0.0, "THREAT": 0.0}
+        metrics = {"ENTROPY": 0.0, "URGENCY": 0.0, "THREAT": 0.0, "DELTA": 0.0}
         if self.gate:
             metrics = self.gate.analyze() # Non-blocking analysis
 
-        cpu_val = metrics["ENTROPY"] * 100
-        mem_val = metrics["URGENCY"] * 100
+        cpu_val = metrics.get("ENTROPY", 0.0) * 100
+        mem_val = metrics.get("URGENCY", 0.0) * 100
+        delta_val = metrics.get("DELTA", 0.0)
 
         cortex_table = Table.grid(padding=1)
         cortex_table.add_column(style="bold cyan", justify="right")
         cortex_table.add_column(style="white")
         cortex_table.add_row("CPU Entropy:", f"{cpu_val:.1f}%")
+        cortex_table.add_row("CPU Delta:", f"{delta_val:.2f}")
         cortex_table.add_row("RAM Urgency:", f"{mem_val:.1f}%")
         cortex_table.add_row("Threat Lvl:", f"{metrics['THREAT']*100:.0f}%")
 
@@ -107,10 +109,11 @@ class Dashboard:
         gate_status = "[green]SOUND[/green]"
         if cpu_val > 90 or mem_val > 90: gate_status = "[red]CRITICAL[/red]"
         elif cpu_val > 80: gate_status = "[yellow]STRESSED[/yellow]"
+        if delta_val > 0.5: gate_status = "[bold red]ENTROPY SPIKE[/bold red]"
 
         # Kinetic Graph (ASCII Bar Chart)
         with self.lock:
-             recent_hist = self.throughput_history[-20:] # Last 20 points
+             recent_hist = self.throughput_history[-40:] # Last 40 points
 
         max_h = max(recent_hist) if recent_hist and max(recent_hist) > 0 else 1.0
         bars = ""
@@ -120,8 +123,8 @@ class Dashboard:
 
         signal_panel = Group(
             Align.center(f"[bold]System State:[/bold]\n{gate_status}"),
-            Align.center(f"\n[dim]Kinetic Graph (Last 2s)[/dim]\n[cyan]{bars}[/cyan]"),
-            Align.center(f"\n[dim]Veto Power Active[/dim]")
+            Align.center(f"\n[dim]Kinetic Graph (Last 4s)[/dim]\n[cyan]{bars}[/cyan]"),
+            Align.center(f"\n[dim]Trajectory Simulation: OPTIMISTIC[/dim]")
         )
 
         self.layout["signals"].update(Panel(
@@ -134,7 +137,7 @@ class Dashboard:
         with self.lock:
             vec_sec = self.vectors_sec
             mb_sec = self.mb_sec
-            sparkline = self.generate_sparkline(self.throughput_history)
+            sparkline = self.generate_sparkline(self.throughput_history[-60:]) # Last 60
             log_text = "\n".join(self.logs)
 
         kinetic_panel = Group(
@@ -157,7 +160,7 @@ class Dashboard:
         ))
 
         # 6. Footer
-        footer_text = "[dim]Ark Omega-Point v112.0 | Native Mode Optimized (f32+Canary)[/dim]"
+        footer_text = "[dim]Ark Omega-Point v112.0 | Native SIMD Kernel (AVX2-Ready) | Signal-First Architecture[/dim]"
         self.layout["footer"].update(Panel(Align.center(footer_text), style="dim"))
 
         return self.layout

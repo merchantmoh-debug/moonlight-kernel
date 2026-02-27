@@ -128,13 +128,16 @@ class SignalGate:
             self.threat_level = 0.05
 
         # Threat Escalation on rapid entropy spike (>50% jump)
+        # Note: In War Speed, we might ignore this or set it lower, but for safety we keep it.
+        # But if delta > 0.5, we escalate.
         if delta > 0.5:
-            self.threat_level = max(self.threat_level, 0.8)
+            self.threat_level = max(self.threat_level, 0.9) # Critical spike
 
         return {
             "ENTROPY": self.entropy_level,
             "URGENCY": self.urgency_level,
-            "THREAT": self.threat_level
+            "THREAT": self.threat_level,
+            "DELTA": delta
         }
 
     def check_veto(self, metrics, strict=False):
@@ -150,8 +153,10 @@ class SignalGate:
              return True, f"[VETO: URGENCY] Memory Pressure Critical (RAM {metrics['URGENCY']*100:.1f}%). OOM Risk Imminent."
 
         # 3. THREAT GATE (Operational Risk)
-        if strict and metrics["THREAT"] > 0.7:
-             return True, f"[VETO: THREAT] Operational Risk too high for Strict Mode ({metrics['THREAT']*100:.1f}%)."
+        # If not strict, we allow up to 0.95
+        limit = 0.7 if strict else 0.95
+        if metrics["THREAT"] > limit:
+             return True, f"[VETO: THREAT] Operational Risk Critical ({metrics['THREAT']*100:.1f}%). Aborting."
 
         return False, "System Sound."
 
@@ -282,7 +287,7 @@ class MoonlightAdapter:
             metrics = self.gate.analyze(context)
 
         # Display Signal Vector (The Adaptor Layer)
-        console.print(f"[bold white]SIGNAL VECTOR:[/bold white] [cyan]ENTROPY: {metrics['ENTROPY']:.2f}[/cyan] | [magenta]URGENCY: {metrics['URGENCY']:.2f}[/magenta] | [red]THREAT: {metrics['THREAT']:.2f}[/red]")
+        console.print(f"[bold white]SIGNAL VECTOR:[/bold white] [cyan]ENTROPY: {metrics['ENTROPY']:.2f}[/cyan] | [magenta]URGENCY: {metrics['URGENCY']:.2f}[/magenta] | [red]THREAT: {metrics['THREAT']:.2f}[/red] | [dim]DELTA: {metrics['DELTA']:.2f}[/dim]")
 
         # 2. The Veto Check (Initial)
         veto, reason = self.gate.check_veto(metrics, strict=strict)
