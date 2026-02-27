@@ -160,6 +160,16 @@ fn Matrix_Float64::add(self : Matrix_Float64, other : Matrix_Float64) -> Matrix_
   res
 }
 
+/// Computes (Mat4x4 * Vec3).
+/// Vec3 is treated as (x, y, z, 1.0)
+fn matrix_vector_mul(m : Mat4x4, v : Vec3) -> Vec3 {
+  let w = m.m30 * v.x + m.m31 * v.y + m.m32 * v.z + m.m33
+  let x = (m.m00 * v.x + m.m01 * v.y + m.m02 * v.z + m.m03) / w
+  let y = (m.m10 * v.x + m.m11 * v.y + m.m12 * v.z + m.m13) / w
+  let z = (m.m20 * v.x + m.m21 * v.y + m.m22 * v.z + m.m23) / w
+  { x, y, z }
+}
+
 struct Mat4x4 {
   m00 : Double; m01 : Double; m02 : Double; m03 : Double
   m10 : Double; m11 : Double; m12 : Double; m13 : Double
@@ -222,15 +232,30 @@ pub fn process_tensor_stream() -> Int {
   let mut processed = 0
   let mask = 65535
 
-  // Kinetic Loop: Unrolled 4x (12 bytes)
-  while diff(read_head, write_head, buffer_size) >= 12 {
+  // Kinetic Loop: Unrolled 8x (24 bytes) - KINETIC V3.3
+  while diff(read_head, write_head, buffer_size) >= 24 {
     let idx = read_head
 
     process_vector_inline(idx)
     process_vector_inline((idx + 3).land(mask))
     process_vector_inline((idx + 6).land(mask))
     process_vector_inline((idx + 9).land(mask))
+    process_vector_inline((idx + 12).land(mask))
+    process_vector_inline((idx + 15).land(mask))
+    process_vector_inline((idx + 18).land(mask))
+    process_vector_inline((idx + 21).land(mask))
 
+    read_head = (read_head + 24).land(mask)
+    processed = processed + 24
+  }
+
+  // Handle Residuals (Intermediate 4x)
+  while diff(read_head, write_head, buffer_size) >= 12 {
+    let idx = read_head
+    process_vector_inline(idx)
+    process_vector_inline((idx + 3).land(mask))
+    process_vector_inline((idx + 6).land(mask))
+    process_vector_inline((idx + 9).land(mask))
     read_head = (read_head + 12).land(mask)
     processed = processed + 12
   }

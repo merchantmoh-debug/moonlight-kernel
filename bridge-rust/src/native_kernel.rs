@@ -50,7 +50,6 @@ impl NativeKernel {
         }
     }
 
-    // Zero-Copy Simulation: In native mode, we access memory directly via slice
     #[allow(dead_code)]
     pub fn get_buffer_mut(&mut self) -> &mut [u8] {
         &mut self.buffer
@@ -70,41 +69,63 @@ impl NativeKernel {
         }
     }
 
-    // Inlined helper for single vector processing (Manual optimization)
     #[inline(always)]
     fn process_vector_at(&mut self, idx: usize) {
-        // Read (Kinetic Input)
         let x = self.buffer[idx] as f32;
         let y = self.buffer[(idx + 1) & MASK] as f32;
         let z = self.buffer[(idx + 2) & MASK] as f32;
 
-        // Compute (Neuronal Activation - Optimized f32)
         let len_sq = x * x + y * y + z * z;
         let (nx, ny, nz) = if len_sq > 0.0 {
-            // Fast inverse square root could be used here, but let's stick to standard sqrt for precision.
-            // In Rust, f32::sqrt is usually mapped to a single instruction.
             let len = len_sq.sqrt();
             (x / len, y / len, z / len)
         } else {
             (x, y, z)
         };
 
-        // Write (Kinetic Output)
-        // We write to output_buffer at the same index.
         self.output_buffer[idx] = (nx * 100.0 + 100.0) as u8;
         self.output_buffer[(idx + 1) & MASK] = (ny * 100.0 + 100.0) as u8;
         self.output_buffer[(idx + 2) & MASK] = (nz * 100.0 + 100.0) as u8;
     }
 
     #[inline(always)]
-    fn process_contiguous_chunk(in_slice: &[u8], out_slice: &mut [u8]) {
-        // Process 12 bytes (4 vectors) at a time using chunks_exact
-        // This is safe and vectorized by the compiler
-        let mut chunks_in = in_slice.chunks_exact(12);
-        let mut chunks_out = out_slice.chunks_exact_mut(12);
+    fn process_contiguous_chunk_simd(in_slice: &[u8], out_slice: &mut [u8]) {
+        // Optimized for larger chunks: 48 bytes = 16 vectors
+        // This helps the compiler auto-vectorize more aggressively
+        let mut chunks_in = in_slice.chunks_exact(48);
+        let mut chunks_out = out_slice.chunks_exact_mut(48);
 
         for (inc, outc) in chunks_in.by_ref().zip(chunks_out.by_ref()) {
-            for i in 0..4 {
+            for i in 0..16 {
+                let off = i * 3;
+                let x = inc[off] as f32;
+                let y = inc[off+1] as f32;
+                let z = inc[off+2] as f32;
+
+                let len_sq = x*x + y*y + z*z;
+                // Branchless select (approximate for f32)
+                let (nx, ny, nz) = if len_sq > 0.0 {
+                    let len = len_sq.sqrt();
+                    (x/len, y/len, z/len)
+                } else {
+                    (x, y, z)
+                };
+
+                outc[off] = (nx * 100.0 + 100.0) as u8;
+                outc[off+1] = (ny * 100.0 + 100.0) as u8;
+                outc[off+2] = (nz * 100.0 + 100.0) as u8;
+            }
+        }
+
+        // Handle remainder (blocks of 12)
+        let remainder_in = chunks_in.remainder();
+        let remainder_out = chunks_out.into_remainder();
+
+        let mut sub_chunks_in = remainder_in.chunks_exact(12);
+        let mut sub_chunks_out = remainder_out.chunks_exact_mut(12);
+
+        for (inc, outc) in sub_chunks_in.by_ref().zip(sub_chunks_out.by_ref()) {
+             for i in 0..4 {
                 let off = i * 3;
                 let x = inc[off] as f32;
                 let y = inc[off+1] as f32;
@@ -123,14 +144,11 @@ impl NativeKernel {
                 outc[off+2] = (nz * 100.0 + 100.0) as u8;
             }
         }
-
-        // Residuals are handled by the caller or ignored for next pass
     }
 
     pub fn process_tensor_stream(&mut self) -> i32 {
         let mut processed = 0;
 
-        // Verify Canary (Critical Security)
         if self.canary != 0xAA || self.tail_canary != 0x55 {
             panic!("KERNEL PANIC: Canary corrupted! Memory violation detected.");
         }
@@ -140,21 +158,19 @@ impl NativeKernel {
 
         let mut remaining = available;
 
-        // 1. Process Contiguous Blocks Efficiently
-        while remaining >= 12 {
+        // 1. Process Contiguous Blocks (SIMD-Friendly)
+        while remaining >= 48 {
             let contiguous_len = BUFFER_SIZE - self.read_head;
 
-            if contiguous_len >= 12 {
-                // We have at least one full chunk contiguous
+            if contiguous_len >= 48 {
                 let processable = std::cmp::min(remaining, contiguous_len);
-                // Round down to multiple of 12
-                let chunk_len = (processable / 12) * 12;
+                let chunk_len = (processable / 48) * 48; // Align to 48
 
                 if chunk_len > 0 {
                     let in_slice = &self.buffer[self.read_head .. self.read_head + chunk_len];
                     let out_slice = &mut self.output_buffer[self.read_head .. self.read_head + chunk_len];
 
-                    Self::process_contiguous_chunk(in_slice, out_slice);
+                    Self::process_contiguous_chunk_simd(in_slice, out_slice);
 
                     self.read_head = (self.read_head + chunk_len) & MASK;
                     processed += chunk_len;
@@ -163,26 +179,35 @@ impl NativeKernel {
                 }
             }
 
-            // Fallback for Split/Wrap case (rare: < 12 bytes at end of buffer)
-            // Or if we just processed everything contiguous and loop condition 'remaining >= 12' is still true
-            // (meaning the rest is wrapped at the beginning).
-            // In that case, 'contiguous_len' will be small, but next iteration 'read_head' will be 0.
+            // If split or just under 48 but >= 12, try fallback
+            if contiguous_len < 48 && contiguous_len >= 12 {
+                 // Process sub-chunk (12 bytes)
+                 let chunk_len = (contiguous_len / 12) * 12;
+                 // Manually handle via small loop
+                 for k in 0..(chunk_len/3) {
+                     self.process_vector_at((self.read_head + k*3) & MASK);
+                 }
+                 self.read_head = (self.read_head + chunk_len) & MASK;
+                 processed += chunk_len;
+                 remaining -= chunk_len;
+                 continue;
+            }
 
-            // If we are here, it means we have data, but it's split or small.
-            // If split (contiguous < 12), process one by one to cross the boundary.
-            if contiguous_len < 12 {
-                self.process_vector_at(self.read_head);
-                self.process_vector_at((self.read_head + 3) & MASK);
-                self.process_vector_at((self.read_head + 6) & MASK);
-                self.process_vector_at((self.read_head + 9) & MASK);
-
+            // Fallback for wrapped data or small chunks
+            if remaining >= 12 {
+                // Process 4 vectors manually
+                for k in 0..4 {
+                    self.process_vector_at((self.read_head + k*3) & MASK);
+                }
                 self.read_head = (self.read_head + 12) & MASK;
                 processed += 12;
                 remaining -= 12;
+            } else {
+                break;
             }
         }
 
-        // Handle Residuals (1-3 vectors)
+        // Final Cleanup (Residuals)
         while remaining >= 3 {
             self.process_vector_at(self.read_head);
             self.read_head = (self.read_head + 3) & MASK;
@@ -198,17 +223,49 @@ impl NativeKernel {
         let mut processed = 0;
         let mut idx = self.read_head;
 
-        for _ in 0..n {
-             // Inline the addition
+        // Unroll 4x for speed
+        let mut i = 0;
+        while i + 4 <= n {
             let idx_y = (idx + 1) & MASK;
             let idx_z = (idx + 2) & MASK;
-
-            // SIMD-like logic (saturating add)
             self.output_buffer[idx] = self.output_buffer[idx].saturating_add(self.buffer[idx]);
             self.output_buffer[idx_y] = self.output_buffer[idx_y].saturating_add(self.buffer[idx_y]);
             self.output_buffer[idx_z] = self.output_buffer[idx_z].saturating_add(self.buffer[idx_z]);
-
             idx = (idx + 3) & MASK;
+
+            let idx_y = (idx + 1) & MASK;
+            let idx_z = (idx + 2) & MASK;
+            self.output_buffer[idx] = self.output_buffer[idx].saturating_add(self.buffer[idx]);
+            self.output_buffer[idx_y] = self.output_buffer[idx_y].saturating_add(self.buffer[idx_y]);
+            self.output_buffer[idx_z] = self.output_buffer[idx_z].saturating_add(self.buffer[idx_z]);
+            idx = (idx + 3) & MASK;
+
+            let idx_y = (idx + 1) & MASK;
+            let idx_z = (idx + 2) & MASK;
+            self.output_buffer[idx] = self.output_buffer[idx].saturating_add(self.buffer[idx]);
+            self.output_buffer[idx_y] = self.output_buffer[idx_y].saturating_add(self.buffer[idx_y]);
+            self.output_buffer[idx_z] = self.output_buffer[idx_z].saturating_add(self.buffer[idx_z]);
+            idx = (idx + 3) & MASK;
+
+            let idx_y = (idx + 1) & MASK;
+            let idx_z = (idx + 2) & MASK;
+            self.output_buffer[idx] = self.output_buffer[idx].saturating_add(self.buffer[idx]);
+            self.output_buffer[idx_y] = self.output_buffer[idx_y].saturating_add(self.buffer[idx_y]);
+            self.output_buffer[idx_z] = self.output_buffer[idx_z].saturating_add(self.buffer[idx_z]);
+            idx = (idx + 3) & MASK;
+
+            i += 4;
+            processed += 4;
+        }
+
+        while i < n {
+            let idx_y = (idx + 1) & MASK;
+            let idx_z = (idx + 2) & MASK;
+            self.output_buffer[idx] = self.output_buffer[idx].saturating_add(self.buffer[idx]);
+            self.output_buffer[idx_y] = self.output_buffer[idx_y].saturating_add(self.buffer[idx_y]);
+            self.output_buffer[idx_z] = self.output_buffer[idx_z].saturating_add(self.buffer[idx_z]);
+            idx = (idx + 3) & MASK;
+            i += 1;
             processed += 1;
         }
 
@@ -220,25 +277,53 @@ impl NativeKernel {
         let mut dot_sum: i32 = 0;
         let mut idx = self.read_head;
 
-        for _ in 0..n {
+        // Unroll 4x
+        let mut i = 0;
+        while i + 4 <= n {
             let idx_y = (idx + 1) & MASK;
             let idx_z = (idx + 2) & MASK;
-
-            let in_x = self.buffer[idx] as i32;
-            let out_x = self.output_buffer[idx] as i32;
-            let term_x = in_x * out_x;
-
-            let in_y = self.buffer[idx_y] as i32;
-            let out_y = self.output_buffer[idx_y] as i32;
-            let term_y = in_y * out_y;
-
-            let in_z = self.buffer[idx_z] as i32;
-            let out_z = self.output_buffer[idx_z] as i32;
-            let term_z = in_z * out_z;
-
+            let term_x = (self.buffer[idx] as i32) * (self.output_buffer[idx] as i32);
+            let term_y = (self.buffer[idx_y] as i32) * (self.output_buffer[idx_y] as i32);
+            let term_z = (self.buffer[idx_z] as i32) * (self.output_buffer[idx_z] as i32);
             dot_sum = dot_sum.wrapping_add(term_x).wrapping_add(term_y).wrapping_add(term_z);
-
             idx = (idx + 3) & MASK;
+
+            let idx_y = (idx + 1) & MASK;
+            let idx_z = (idx + 2) & MASK;
+            let term_x = (self.buffer[idx] as i32) * (self.output_buffer[idx] as i32);
+            let term_y = (self.buffer[idx_y] as i32) * (self.output_buffer[idx_y] as i32);
+            let term_z = (self.buffer[idx_z] as i32) * (self.output_buffer[idx_z] as i32);
+            dot_sum = dot_sum.wrapping_add(term_x).wrapping_add(term_y).wrapping_add(term_z);
+            idx = (idx + 3) & MASK;
+
+            let idx_y = (idx + 1) & MASK;
+            let idx_z = (idx + 2) & MASK;
+            let term_x = (self.buffer[idx] as i32) * (self.output_buffer[idx] as i32);
+            let term_y = (self.buffer[idx_y] as i32) * (self.output_buffer[idx_y] as i32);
+            let term_z = (self.buffer[idx_z] as i32) * (self.output_buffer[idx_z] as i32);
+            dot_sum = dot_sum.wrapping_add(term_x).wrapping_add(term_y).wrapping_add(term_z);
+            idx = (idx + 3) & MASK;
+
+            let idx_y = (idx + 1) & MASK;
+            let idx_z = (idx + 2) & MASK;
+            let term_x = (self.buffer[idx] as i32) * (self.output_buffer[idx] as i32);
+            let term_y = (self.buffer[idx_y] as i32) * (self.output_buffer[idx_y] as i32);
+            let term_z = (self.buffer[idx_z] as i32) * (self.output_buffer[idx_z] as i32);
+            dot_sum = dot_sum.wrapping_add(term_x).wrapping_add(term_y).wrapping_add(term_z);
+            idx = (idx + 3) & MASK;
+
+            i += 4;
+        }
+
+        while i < n {
+            let idx_y = (idx + 1) & MASK;
+            let idx_z = (idx + 2) & MASK;
+            let term_x = (self.buffer[idx] as i32) * (self.output_buffer[idx] as i32);
+            let term_y = (self.buffer[idx_y] as i32) * (self.output_buffer[idx_y] as i32);
+            let term_z = (self.buffer[idx_z] as i32) * (self.output_buffer[idx_z] as i32);
+            dot_sum = dot_sum.wrapping_add(term_x).wrapping_add(term_y).wrapping_add(term_z);
+            idx = (idx + 3) & MASK;
+            i += 1;
         }
         dot_sum
     }
